@@ -1,0 +1,56 @@
+
+    /*
+            std::clog << std::left << std::setfill('0') << std::setw(4) << std::hex << PC << " ";
+
+            std::clog << std::setw(2) << "A:" <<(unsigned) A << " X:" <<(unsigned) X << " Y:" << (unsigned) Y << " P:" << unsigned(P) << " S:" << (unsigned) S;
+*/
+
+  //          std::clog << " op:" << op << std::endl;
+
+namespace
+{
+    void run_tests()
+    {
+        const std::string tests[]
+        {
+            "01-basics.nes",
+            "02-implied.nes",
+            "03-immediate.nes",
+            "04-zero_page.nes",
+            "05-zp_xy.nes",
+            "06-absolute.nes",
+            "07-abs_xy.nes",
+            "08-ind_x.nes",
+            "09-ind_y.nes",
+            "10-branches.nes",
+            "11-stack.nes",
+            "12-jmp_jsr.nes",
+            "13-rts.nes",
+            "14-rti.nes",
+            "15-brk.nes",
+            "16-special.nes"
+        };
+        for (const auto& t : tests)
+        {
+            std::clog << "test: " << t << std::endl;
+            auto cartridge{nes::emulator::Cartridge::load("res/roms/tests/instr_test-v5/rom_singles/" + t)};
+            nes::emulator::CPU cpu;
+            nes::emulator::PPU ppu;
+            unsigned char internal_ram[0x0800];
+            nes::emulator::CPU::MemPointers mem_pointers;
+            mem_pointers.internal_ram   = internal_ram;
+            mem_pointers.ppu            = &ppu;
+            mem_pointers.cartridge      = &cartridge;
+            cpu.set_mem_pointers(mem_pointers);
+            while (cartridge.read_ram(1) != 0xDE ||
+                   cartridge.read_ram(2) != 0xB0 || 
+                   cartridge.read_ram(3) != 0x61 ||
+                   cartridge.read_ram(0) >= 0x80)
+                cpu.tick();
+            char c;
+            for (int i = 4; (c = cartridge.read_ram(i++));)
+                std::clog << c;
+            std::clog << std::endl << std::endl;
+        }
+    }
+}
