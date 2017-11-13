@@ -61,6 +61,7 @@ void PPU::render_pixel() noexcept
 
 void PPU::tick() noexcept
 {
+    if (!--open_bus_decay_timer) open_bus = 0;
     switch (scanline)
     {
         case 241: if (clks == 1) vblank         = true;  break;

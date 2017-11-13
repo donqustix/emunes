@@ -43,7 +43,7 @@ namespace nes::emulator
 
         static constexpr u8 MASK_MASK_RENDERING_ENABLED = MASK_MASK_SHOW_BACKGROUND | MASK_MASK_SHOW_SPRITES;
 
-        unsigned char ctrl = 0, mask = 0, data_buff, open_bus, decay_reg;
+        unsigned char ctrl = 0, mask = 0, data_buff, open_bus;
         unsigned char ram[0x0800], palette[0x20], oam[256], scan_oam[32];
 
         unsigned framebuffer[240 * 256];
@@ -51,7 +51,7 @@ namespace nes::emulator
         u8 xfine, nt, at, bg_lo, bg_hi, at_latch_hi, at_latch_lo;
 
         u16 bg_shift_lo, bg_shift_hi, at_shift_lo, at_shift_hi, faddr;
-        u16 clks = 0, scanline = 261, vaddr = 0, tmp_vaddr;
+        u16 clks = 0, scanline = 261, vaddr = 0, tmp_vaddr, open_bus_decay_timer = 0;
 
         bool write_toggle = false, odd_frame = false, vblank = false, new_frame_post = false;
 
@@ -154,10 +154,17 @@ namespace nes::emulator
         void open_bus_read_data() noexcept
         {
             u8 temp = memory_read(vaddr);
-            if (vaddr < 0x3F00) {temp = data_buff; data_buff = memory_read(vaddr);                 open_bus  = temp;     }
-            else                {temp = data_buff            = memory_read(vaddr); open_bus &= 63; open_bus |= temp & ~63;}
+            if (vaddr < 0x3F00) {temp = data_buff; data_buff = memory_read(vaddr); open_bus_refresh<255>(temp); }
+            else                {temp = data_buff            = memory_read(vaddr); open_bus_refresh< 63>(temp); }
             vaddr += ctrl & CTRL_MASK_VRAM_ADDRESS_INCREMENT ? 32 : 1;
             vaddr &= 0x7FFF;
+        }
+
+        template<u8 mask>
+        void open_bus_refresh(u8 value) noexcept
+        {
+            open_bus_decay_timer = 7777;
+            open_bus &= ~mask; open_bus |= value & mask;
         }
 
         void render_pixel() noexcept;
@@ -171,7 +178,7 @@ namespace nes::emulator
         template<unsigned reg>
         void reg_write(u8 value) noexcept
         {
-            open_bus = value;
+            open_bus_refresh<255>(value);
                  if constexpr (reg == 0) open_bus_write_ctrl();
             else if constexpr (reg == 1) open_bus_write_mask();
             else if constexpr (reg == 5) open_bus_write_scroll();
