@@ -9,8 +9,6 @@ namespace nes::emulator
 
     class PPU final
     {
-        friend class MMU;
-
     public:
         struct MemPointers
         {
@@ -49,6 +47,7 @@ namespace nes::emulator
         unsigned framebuffer[240 * 256];
 
         u8 xfine, nt, at, bg_lo, bg_hi, at_latch_hi, at_latch_lo;
+        u8 oam_addr;
 
         u16 bg_shift_lo, bg_shift_hi, at_shift_lo, at_shift_hi, faddr;
         u16 clks = 0, scanline = 261, vaddr = 0, tmp_vaddr, open_bus_decay_timer = 0;
@@ -105,6 +104,9 @@ namespace nes::emulator
 
         void open_bus_write_mask() noexcept {mask = open_bus;}
 
+        void open_bus_write_oam_addr() noexcept {    oam_addr    = open_bus;}
+        void open_bus_write_oam_data() noexcept {oam[oam_addr++] = open_bus;}
+
         void open_bus_write_scroll() noexcept
         {
             if (write_toggle)
@@ -160,6 +162,8 @@ namespace nes::emulator
             vaddr &= 0x7FFF;
         }
 
+        void open_bus_read_oam_data() noexcept {open_bus_refresh<255>(oam[oam_addr]);}
+
         template<u8 mask>
         void open_bus_refresh(u8 value) noexcept
         {
@@ -181,6 +185,8 @@ namespace nes::emulator
             open_bus_refresh<255>(value);
                  if constexpr (reg == 0) open_bus_write_ctrl();
             else if constexpr (reg == 1) open_bus_write_mask();
+            else if constexpr (reg == 3) open_bus_write_oam_addr();
+            else if constexpr (reg == 4) open_bus_write_oam_data();
             else if constexpr (reg == 5) open_bus_write_scroll();
             else if constexpr (reg == 6) open_bus_write_addr();
             else if constexpr (reg == 7) open_bus_write_data();
@@ -190,6 +196,7 @@ namespace nes::emulator
         u8 reg_read() noexcept
         {
                  if constexpr (reg == 2) open_bus_read_status();
+            else if constexpr (reg == 4) open_bus_read_oam_data();
             else if constexpr (reg == 7) open_bus_read_data();
 
             return open_bus;

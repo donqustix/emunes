@@ -27,8 +27,9 @@ void CPU::wb(u16 address, u8 value) noexcept
         {
             case 0: mem_pointers.ppu->reg_write<0>(value);  break;
             case 1: mem_pointers.ppu->reg_write<1>(value);  break;
-           // case 3: mem_pointers.ppu->oamaddr = value;     break;
-           // case 4: mem_pointers.ppu->oamdata = value;     break;
+            case 2: mem_pointers.ppu->reg_write<2>(value);  break;
+            case 3: mem_pointers.ppu->reg_write<3>(value);  break;
+            case 4: mem_pointers.ppu->reg_write<4>(value);  break;
             case 5: mem_pointers.ppu->reg_write<5>(value);  break; // x2
             case 6: mem_pointers.ppu->reg_write<6>(value);  break; // x2
             case 7: mem_pointers.ppu->reg_write<7>(value);  break;
@@ -50,8 +51,13 @@ u8 CPU::rb(u16 address) noexcept
         // $2008 - $4000 - mirrors of $2000-$2007 (repeats every 8 bytes)
         switch (address % 8)
         {
+            case  0: return mem_pointers.ppu->reg_read<0>();
+            case  1: return mem_pointers.ppu->reg_read<1>();
             case  2: return mem_pointers.ppu->reg_read<2>();
-            //case  4: return mem_pointers.ppu->oamdata;
+            case  3: return mem_pointers.ppu->reg_read<3>();
+            case  4: return mem_pointers.ppu->reg_read<4>();
+            case  5: return mem_pointers.ppu->reg_read<5>();
+            case  6: return mem_pointers.ppu->reg_read<6>();
             case  7: return mem_pointers.ppu->reg_read<7>();
             default: return 0;
         }

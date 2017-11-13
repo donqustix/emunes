@@ -29,7 +29,7 @@ Cartridge Cartridge::load(std::string_view filepath)
     const int rom_size = 16384 * rom16_banks, vmem_size = 8192 * vrom8_banks;
     std::vector<unsigned char> rom, ram(8192), vmem;  rom.reserve( rom_size);
                                                      vmem.reserve(vmem_size);
-    std::copy_n(std::istreambuf_iterator<char>{stream},  rom_size, std::back_inserter(rom)); stream.get();
+    std::copy_n(std::istreambuf_iterator<char>{stream},  rom_size, std::back_inserter(rom)); stream.get(); // FIXME: strange byte
     std::copy_n(std::istreambuf_iterator<char>{stream}, vmem_size, std::back_inserter(vmem));
     return Cartridge{std::move(rom), std::move(ram), std::move(vmem)};
 }

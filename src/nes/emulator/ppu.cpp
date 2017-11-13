@@ -66,42 +66,41 @@ void PPU::tick() noexcept
     {
         case 241: if (clks == 1) vblank         = true;  break;
         case 240: if (clks == 0) new_frame_post = true;  break;
-        default:
-            if (scanline == 261 && clks == 1) vblank = false;
-            if ((mask & MASK_MASK_RENDERING_ENABLED) && (scanline < 240 || scanline == 261))
-            {
-                switch (clks)
+        case 261: if (clks == 1) vblank         = false; break;
+    }
+    if ((mask & MASK_MASK_RENDERING_ENABLED) && (scanline < 240 || scanline == 261))
+    {
+        if (clks >= 257 && clks <= 320) oam_addr = 0;
+        switch (clks)
+        {
+            case   0:                                                                    break;
+            case   1: faddr = addr_nt();                                                 break;
+            case 256: render_pixel(); bg_hi = memory_read(faddr); v_scroll();            break;
+            case 257: render_pixel(); reload_shift_regs();        h_update();            break;
+            case 321:
+            case 339: faddr = addr_nt();                                                 break;
+            case 338: nt = memory_read(faddr);                                           break;
+            case 340: nt = memory_read(faddr); if (scanline == 261 && odd_frame) ++clks; break;
+            default:
+                if (scanline  == 261 && clks >= 280 && clks <= 304) v_update();
+                else if (clks <= 255 || clks >= 322)
                 {
-                    case   0:                                                                    break;
-                    case   1: faddr = addr_nt();                                                 break;
-                    case 256: render_pixel(); bg_hi = memory_read(faddr); v_scroll();            break;
-                    case 257: render_pixel(); reload_shift_regs();        h_update();            break;
-                    case 321:
-                    case 339: faddr = addr_nt();                                                 break;
-                    case 338: nt = memory_read(faddr);                                           break;
-                    case 340: nt = memory_read(faddr); if (scanline == 261 && odd_frame) ++clks; break;
-                    default:
-                        if (scanline  == 261 && clks >= 280 && clks <= 304) v_update();
-                        else if (clks <= 255 || clks >= 322)
-                        {
-                            render_pixel();
-                            switch (clks % 8)
-                            {
-                                case 1: faddr = addr_nt(); reload_shift_regs();               break;
-                                case 3: faddr = addr_at();                                    break;
-                                case 5: faddr = addr_bg();                                    break;
-                                case 7: faddr += 8;                                           break;
-                                case 2: nt    = memory_read(faddr);                           break;
-                                case 4: at    = memory_read(faddr); if (vaddr & 64) at >>= 4;
-                                                                    if (vaddr &  2) at >>= 2; break;
-                                case 6: bg_lo = memory_read(faddr);                           break;
-                                case 0: bg_hi = memory_read(faddr); h_scroll();               break;
-                            }
-                        }
-                    break;
+                    render_pixel();
+                    switch (clks % 8)
+                    {
+                        case 1: faddr = addr_nt(); reload_shift_regs();               break;
+                        case 3: faddr = addr_at();                                    break;
+                        case 5: faddr = addr_bg();                                    break;
+                        case 7: faddr += 8;                                           break;
+                        case 2: nt    = memory_read(faddr);                           break;
+                        case 4: at    = memory_read(faddr); if (vaddr & 64) at >>= 4;
+                                                            if (vaddr &  2) at >>= 2; break;
+                        case 6: bg_lo = memory_read(faddr);                           break;
+                        case 0: bg_hi = memory_read(faddr); h_scroll();               break;
+                    }
                 }
-            }
-        break;
+            break;
+        }
     }
 
     if (++clks > 340)
