@@ -37,7 +37,7 @@ int main()
             if (event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) running = false;
 
         for (int i = 0; i < 8000; ++i)
-            cpu.tick();
+            cpu.instruction();
 
         if (ppu.new_frame())
         {

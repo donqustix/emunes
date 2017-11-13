@@ -43,8 +43,8 @@ namespace nes::emulator
 
         static constexpr u8 MASK_MASK_RENDERING_ENABLED = MASK_MASK_SHOW_BACKGROUND | MASK_MASK_SHOW_SPRITES;
 
-        unsigned char ctrl = 0, mask = 0, data_buff;
-        unsigned char ram[0x0800], palette[0x20], oam[256];
+        unsigned char ctrl = 0, mask = 0, data_buff, open_bus, decay_reg;
+        unsigned char ram[0x0800], palette[0x20], oam[256], scan_oam[32];
 
         unsigned framebuffer[240 * 256];
 
@@ -96,74 +96,96 @@ namespace nes::emulator
         u16 addr_at() const noexcept {return 0x23C0 | (vaddr & 0x0C00) | (vaddr >> 4 & 0x38) | (vaddr >> 2 & 0x07);}
         u16 addr_bg() const noexcept {return 0x1000 * pattern_table_address() + 16 * nt + (vaddr >> 12);}
 
-        void render_pixel() noexcept;
-
-    public:
-        PPU() noexcept {for (int i = 0; i < 0x800; ++i) ram[i] = (i & 4) ? 255 : 0;}
-
-        void write_ctrl(u8 value) noexcept
+        void open_bus_write_ctrl() noexcept
         {
-            tmp_vaddr &=           0b111001111111111;
-            tmp_vaddr |=  (value & 0b000000000000011) << 10;
-            ctrl = value;
+            tmp_vaddr &=              0b111001111111111;
+            tmp_vaddr |=  (open_bus & 0b000000000000011) << 10;
+            ctrl = open_bus;
         }
 
-        void write_mask(u8 value) noexcept {mask = value;}
+        void open_bus_write_mask() noexcept {mask = open_bus;}
 
-        void write_scroll(u8 value) noexcept
+        void open_bus_write_scroll() noexcept
         {
             if (write_toggle)
             {
-                tmp_vaddr &=          0b000110000011111;
-                tmp_vaddr |= (value & 0b000000000000111) << 12;
-                tmp_vaddr |= (value & 0b000000011111000) <<  2;
+                tmp_vaddr &=             0b000110000011111;
+                tmp_vaddr |= (open_bus & 0b000000000000111) << 12;
+                tmp_vaddr |= (open_bus & 0b000000011111000) <<  2;
             }
             else
             {
-                tmp_vaddr &=          0b111111111100000;
-                tmp_vaddr |= (value & 0b000000011111000) >> 3;
-                xfine      =  value & 0xb00000111;
+                tmp_vaddr &=             0b111111111100000;
+                tmp_vaddr |= (open_bus & 0b000000011111000) >> 3;
+                xfine      =  open_bus & 0xb00000111;
             }
             write_toggle = !write_toggle;
         }
 
-        void write_addr(u8 value) noexcept
+        void open_bus_write_addr() noexcept
         {
             if (write_toggle)
             {
-                tmp_vaddr &=         0b111111100000000;
-                tmp_vaddr |= value & 0b000000011111111;
+                tmp_vaddr &=            0b111111100000000;
+                tmp_vaddr |= open_bus & 0b000000011111111;
                 vaddr = tmp_vaddr;
             }
             else
             {
-                tmp_vaddr &=          0b000000011111111;
-                tmp_vaddr |= (value & 0b000000000111111) << 8;
+                tmp_vaddr &=             0b000000011111111;
+                tmp_vaddr |= (open_bus & 0b000000000111111) << 8;
             }
             write_toggle = !write_toggle;
         }
 
-        void write_data(u8 value) noexcept
+        void open_bus_write_data() noexcept
         {
-            memory_write(vaddr, value);
+            memory_write(vaddr, open_bus);
             vaddr += ctrl & CTRL_MASK_VRAM_ADDRESS_INCREMENT ? 32 : 1;
             vaddr &= 0x7FFF;
         }
 
-        u8 read_status() noexcept
+        void open_bus_read_status() noexcept
         {
             const u8 temp = vblank << 7; write_toggle = vblank = false;
-            return   temp;
+            open_bus &= 31; open_bus |= temp & ~31;
         }
 
-        u8 read_dada() noexcept
+        void open_bus_read_data() noexcept
         {
             u8 temp = memory_read(vaddr);
-            if (vaddr < 0x3F00) {temp = data_buff; data_buff = memory_read(vaddr);}
-            else                 temp = data_buff            = memory_read(vaddr);
+            if (vaddr < 0x3F00) {temp = data_buff; data_buff = memory_read(vaddr);                 open_bus  = temp;     }
+            else                {temp = data_buff            = memory_read(vaddr); open_bus &= 63; open_bus |= temp & ~63;}
             vaddr += ctrl & CTRL_MASK_VRAM_ADDRESS_INCREMENT ? 32 : 1;
             vaddr &= 0x7FFF;
-            return temp;
+        }
+
+        void render_pixel() noexcept;
+
+    public:
+        PPU() noexcept
+        {
+            for (int i = 0; i < 0x800; ++i) ram[i] = (i & 4) ? 255 : 0;
+        }
+
+        template<unsigned reg>
+        void reg_write(u8 value) noexcept
+        {
+            open_bus = value;
+                 if constexpr (reg == 0) open_bus_write_ctrl();
+            else if constexpr (reg == 1) open_bus_write_mask();
+            else if constexpr (reg == 5) open_bus_write_scroll();
+            else if constexpr (reg == 6) open_bus_write_addr();
+            else if constexpr (reg == 7) open_bus_write_data();
+        }
+
+        template<unsigned reg>
+        u8 reg_read() noexcept
+        {
+                 if constexpr (reg == 2) open_bus_read_status();
+            else if constexpr (reg == 7) open_bus_read_data();
+
+            return open_bus;
         }
 
         void set_mem_pointers(const MemPointers& mem_pointers) noexcept {this->mem_pointers = mem_pointers;}

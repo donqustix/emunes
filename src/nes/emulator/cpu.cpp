@@ -25,13 +25,13 @@ void CPU::wb(u16 address, u8 value) noexcept
         // $2008 - $4000 - mirrors of $2000-$2007 (repeats every 8 bytes)
         switch (address % 8)
         {
-            case 0: mem_pointers.ppu->write_ctrl(value);        break;
-            case 1: mem_pointers.ppu->write_mask(value);        break;
+            case 0: mem_pointers.ppu->reg_write<0>(value);  break;
+            case 1: mem_pointers.ppu->reg_write<1>(value);  break;
            // case 3: mem_pointers.ppu->oamaddr = value;     break;
            // case 4: mem_pointers.ppu->oamdata = value;     break;
-            case 5: mem_pointers.ppu->write_scroll(value);      break; // x2
-            case 6: mem_pointers.ppu->write_addr(value);        break; // x2
-            case 7: mem_pointers.ppu->write_data(value);        break;
+            case 5: mem_pointers.ppu->reg_write<5>(value);  break; // x2
+            case 6: mem_pointers.ppu->reg_write<6>(value);  break; // x2
+            case 7: mem_pointers.ppu->reg_write<7>(value);  break;
         }
     }
     else if (address < 0x4018); // apu and I/O registers
@@ -50,9 +50,9 @@ u8 CPU::rb(u16 address) noexcept
         // $2008 - $4000 - mirrors of $2000-$2007 (repeats every 8 bytes)
         switch (address % 8)
         {
-            case  2: return mem_pointers.ppu->read_status();
+            case  2: return mem_pointers.ppu->reg_read<2>();
             //case  4: return mem_pointers.ppu->oamdata;
-            case  7: return mem_pointers.ppu->read_dada();
+            case  7: return mem_pointers.ppu->reg_read<7>();
             default: return 0;
         }
     else if (address < 0x4018) return 0; // apu and I/O registers
@@ -62,7 +62,7 @@ u8 CPU::rb(u16 address) noexcept
     else return mem_pointers.cartridge->read_rom(address - 0xC000); // cartridge space
 }
 
-void CPU::tick() noexcept
+void CPU::instruction() noexcept
 {
     u16 op = rb(PC++); PC &= 0xFFFF;
 

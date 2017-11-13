@@ -243,7 +243,7 @@ namespace nes::emulator
     public:
         void set_mem_pointers(const MemPointers& mem_pointers) noexcept {this->mem_pointers = mem_pointers;}
         void set_nmi(bool nmi) noexcept {this->nmi = nmi;}
-        void tick() noexcept;
+        void instruction() noexcept;
     };
 }
 
