@@ -35,7 +35,10 @@ void CPU::wb(u16 address, u8 value) noexcept
             case 7: mem_pointers.ppu->reg_write<7>(value);  break;
         }
     }
-    else if (address < 0x4018); // apu and I/O registers
+    else if (address < 0x4018) // apu and I/O registers
+    {
+        if (address == 0x4014) oam_dma(value);
+    }
     else if (address < 0x4020); // normally disabled
     else if (address < 0x6000); // cartridge space
     else if (address < 0x8000) mem_pointers.cartridge->write_ram(address - 0x6000, value);
@@ -66,6 +69,14 @@ u8 CPU::rb(u16 address) noexcept
     else if (address < 0x8000) return 0;
     else if (address < 0xC000) return mem_pointers.cartridge->read_rom(address - 0x8000);
     else return mem_pointers.cartridge->read_rom(address - 0xC000); // cartridge space
+}
+
+void CPU::oam_dma(u8 value) noexcept
+{
+    rb(value << 8);
+    if (mem_pointers.ppu->odd_frame()) sync_hardware();
+    for (u16 i = 0; i < 256; ++i)
+        wb(0x2004, rb((value << 8) | i));
 }
 
 void CPU::instruction() noexcept

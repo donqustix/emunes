@@ -41,18 +41,20 @@ namespace nes::emulator
 
         static constexpr u8 MASK_MASK_RENDERING_ENABLED = MASK_MASK_SHOW_BACKGROUND | MASK_MASK_SHOW_SPRITES;
 
-        unsigned char ctrl = 0, mask = 0, data_buff, open_bus;
-        unsigned char ram[0x0800], palette[0x20], oam[256], scan_oam[32];
+        unsigned char latch_sprite_x[8], latch_sprite_attr[8], latch_sprite_id, latch_sprite_y;
+        unsigned char ctrl = 0, mask = 0, stat = 0, data_buff, open_bus_data;
+        unsigned char ram[0x0800], palette[0x20], oam[256], scan_oam[32], oam_data;
 
         unsigned framebuffer[240 * 256];
 
         u8 xfine, nt, at, bg_lo, bg_hi, at_latch_hi, at_latch_lo;
-        u8 oam_addr;
+        u8 oam_addr, scan_oam_addr, oam_copy = 0;
 
-        u16 bg_shift_lo, bg_shift_hi, at_shift_lo, at_shift_hi, faddr;
+        u16 bg_shift_lo, bg_shift_hi, at_shift_lo, at_shift_hi, open_bus_addr;
         u16 clks = 0, scanline = 261, vaddr = 0, tmp_vaddr, open_bus_decay_timer = 0;
 
-        bool write_toggle = false, odd_frame = false, vblank = false, new_frame_post = false;
+        bool write_toggle = false, odd_frame_post = false, new_frame_post = false;
+        bool oam_addr_overflow, scan_oam_addr_overflow, sprite_overflow_detection;
 
         MemPointers mem_pointers;
 
@@ -65,6 +67,14 @@ namespace nes::emulator
             bg_shift_hi &= 0xFF00; bg_shift_hi |= bg_hi;
             at_latch_lo = at      & 1;
             at_latch_hi = at >> 1 & 1;
+        }
+
+        void shift_shifters() noexcept
+        {
+            bg_shift_lo <<= 1;
+            bg_shift_hi <<= 1;
+            at_shift_lo = (at_shift_lo << 1) | at_latch_lo;
+            at_shift_hi = (at_shift_hi << 1) | at_latch_hi;
         }
 
         void v_scroll() noexcept
@@ -97,29 +107,29 @@ namespace nes::emulator
 
         void open_bus_write_ctrl() noexcept
         {
-            tmp_vaddr &=              0b111001111111111;
-            tmp_vaddr |=  (open_bus & 0b000000000000011) << 10;
-            ctrl = open_bus;
+            tmp_vaddr &=                   0b111001111111111;
+            tmp_vaddr |=  (open_bus_data & 0b000000000000011) << 10;
+            ctrl = open_bus_data;
         }
 
-        void open_bus_write_mask() noexcept {mask = open_bus;}
+        void open_bus_write_mask() noexcept {mask = open_bus_data;}
 
-        void open_bus_write_oam_addr() noexcept {    oam_addr    = open_bus;}
-        void open_bus_write_oam_data() noexcept {oam[oam_addr++] = open_bus;}
+        void open_bus_write_oam_addr() noexcept {    oam_addr    = open_bus_data;                 }
+        void open_bus_write_oam_data() noexcept {oam[oam_addr++] = open_bus_data; oam_addr &= 255;}
 
         void open_bus_write_scroll() noexcept
         {
             if (write_toggle)
             {
-                tmp_vaddr &=             0b000110000011111;
-                tmp_vaddr |= (open_bus & 0b000000000000111) << 12;
-                tmp_vaddr |= (open_bus & 0b000000011111000) <<  2;
+                tmp_vaddr &=                  0b000110000011111;
+                tmp_vaddr |= (open_bus_data & 0b000000000000111) << 12;
+                tmp_vaddr |= (open_bus_data & 0b000000011111000) <<  2;
             }
             else
             {
-                tmp_vaddr &=             0b111111111100000;
-                tmp_vaddr |= (open_bus & 0b000000011111000) >> 3;
-                xfine      =  open_bus & 0xb00000111;
+                tmp_vaddr &=                  0b111111111100000;
+                tmp_vaddr |= (open_bus_data & 0b000000011111000) >> 3;
+                xfine      =  open_bus_data & 0xb00000111;
             }
             write_toggle = !write_toggle;
         }
@@ -128,29 +138,29 @@ namespace nes::emulator
         {
             if (write_toggle)
             {
-                tmp_vaddr &=            0b111111100000000;
-                tmp_vaddr |= open_bus & 0b000000011111111;
+                tmp_vaddr &=                 0b111111100000000;
+                tmp_vaddr |= open_bus_data & 0b000000011111111;
                 vaddr = tmp_vaddr;
             }
             else
             {
-                tmp_vaddr &=             0b000000011111111;
-                tmp_vaddr |= (open_bus & 0b000000000111111) << 8;
+                tmp_vaddr &=                  0b000000011111111;
+                tmp_vaddr |= (open_bus_data & 0b000000000111111) << 8;
             }
             write_toggle = !write_toggle;
         }
 
         void open_bus_write_data() noexcept
         {
-            memory_write(vaddr, open_bus);
+            memory_write(vaddr, open_bus_data);
             vaddr += ctrl & CTRL_MASK_VRAM_ADDRESS_INCREMENT ? 32 : 1;
             vaddr &= 0x7FFF;
         }
 
         void open_bus_read_status() noexcept
         {
-            const u8 temp = vblank << 7; write_toggle = vblank = false;
-            open_bus &= 31; open_bus |= temp & ~31;
+            const u8 temp = stat; stat = write_toggle = 0;
+            open_bus_data &= 31; open_bus_data |= temp & ~31;
         }
 
         void open_bus_read_data() noexcept
@@ -168,8 +178,34 @@ namespace nes::emulator
         void open_bus_refresh(u8 value) noexcept
         {
             open_bus_decay_timer = 7777;
-            open_bus &= ~mask; open_bus |= value & mask;
+            open_bus_data &= ~mask; open_bus_data |= value & mask;
         }
+
+        void increment_oam_addrs() noexcept
+        {
+            ++     oam_addr;      oam_addr &= 0xFF;
+            ++scan_oam_addr; scan_oam_addr &= 0x1F;
+
+            if (!     oam_addr)      oam_addr_overflow = true;
+            if (!scan_oam_addr) scan_oam_addr_overflow = sprite_overflow_detection = true;
+        }
+
+        void next_cycle() noexcept
+        {
+            if (++clks == 341)
+            {
+                clks = (scanline == 261 && odd_frame_post) ? 1 : 0;
+                if   (++scanline == 262) {scanline = 0; odd_frame_post = !odd_frame_post;}
+            }
+        }
+
+        void sprite_evaluation() noexcept;
+        void sprite_fetches() noexcept;
+        void sprite_processing() noexcept;
+
+        void background_fetches() noexcept;
+        void scroll_evaluation() noexcept;
+        void background_processing() noexcept;
 
         void render_pixel() noexcept;
 
@@ -199,11 +235,13 @@ namespace nes::emulator
             else if constexpr (reg == 4) open_bus_read_oam_data();
             else if constexpr (reg == 7) open_bus_read_data();
 
-            return open_bus;
+            return open_bus_data;
         }
 
         void set_mem_pointers(const MemPointers& mem_pointers) noexcept {this->mem_pointers = mem_pointers;}
-        bool nmi() const noexcept {return vblank && (ctrl & CTRL_MASK_GENERATE_NMI);}
+        bool nmi() const noexcept {return (stat & 0x80) && (ctrl & CTRL_MASK_GENERATE_NMI);}
+        bool odd_frame() noexcept {return odd_frame_post;}
+        bool rendering_enabled() const noexcept {return mask & MASK_MASK_RENDERING_ENABLED;}
         bool new_frame() noexcept
         {
             const bool temp = new_frame_post; new_frame_post = false;

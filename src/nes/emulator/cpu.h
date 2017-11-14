@@ -240,6 +240,8 @@ namespace nes::emulator
             PC |= rb(vectors[type] + 1) << 8;
         }
 
+        void oam_dma(u8 value) noexcept;
+
     public:
         void set_mem_pointers(const MemPointers& mem_pointers) noexcept {this->mem_pointers = mem_pointers;}
         void set_nmi(bool nmi) noexcept {this->nmi = nmi;}
