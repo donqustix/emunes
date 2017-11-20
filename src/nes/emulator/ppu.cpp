@@ -1,13 +1,36 @@
 #include "ppu.h"
 
 #include "cartridge.h"
+#include "cpu.h"
 
 using namespace nes::emulator;
+
+unsigned PPU::rev_bute(unsigned n) noexcept
+{
+    static constexpr unsigned char rev_table[] = {
+      0x00, 0x80, 0x40, 0xC0, 0x20, 0xA0, 0x60, 0xE0, 0x10, 0x90, 0x50, 0xD0, 0x30, 0xB0, 0x70, 0xF0,
+      0x08, 0x88, 0x48, 0xC8, 0x28, 0xA8, 0x68, 0xE8, 0x18, 0x98, 0x58, 0xD8, 0x38, 0xB8, 0x78, 0xF8,
+      0x04, 0x84, 0x44, 0xC4, 0x24, 0xA4, 0x64, 0xE4, 0x14, 0x94, 0x54, 0xD4, 0x34, 0xB4, 0x74, 0xF4,
+      0x0C, 0x8C, 0x4C, 0xCC, 0x2C, 0xAC, 0x6C, 0xEC, 0x1C, 0x9C, 0x5C, 0xDC, 0x3C, 0xBC, 0x7C, 0xFC,
+      0x02, 0x82, 0x42, 0xC2, 0x22, 0xA2, 0x62, 0xE2, 0x12, 0x92, 0x52, 0xD2, 0x32, 0xB2, 0x72, 0xF2,
+      0x0A, 0x8A, 0x4A, 0xCA, 0x2A, 0xAA, 0x6A, 0xEA, 0x1A, 0x9A, 0x5A, 0xDA, 0x3A, 0xBA, 0x7A, 0xFA,
+      0x06, 0x86, 0x46, 0xC6, 0x26, 0xA6, 0x66, 0xE6, 0x16, 0x96, 0x56, 0xD6, 0x36, 0xB6, 0x76, 0xF6,
+      0x0E, 0x8E, 0x4E, 0xCE, 0x2E, 0xAE, 0x6E, 0xEE, 0x1E, 0x9E, 0x5E, 0xDE, 0x3E, 0xBE, 0x7E, 0xFE,
+      0x01, 0x81, 0x41, 0xC1, 0x21, 0xA1, 0x61, 0xE1, 0x11, 0x91, 0x51, 0xD1, 0x31, 0xB1, 0x71, 0xF1,
+      0x09, 0x89, 0x49, 0xC9, 0x29, 0xA9, 0x69, 0xE9, 0x19, 0x99, 0x59, 0xD9, 0x39, 0xB9, 0x79, 0xF9,
+      0x05, 0x85, 0x45, 0xC5, 0x25, 0xA5, 0x65, 0xE5, 0x15, 0x95, 0x55, 0xD5, 0x35, 0xB5, 0x75, 0xF5,
+      0x0D, 0x8D, 0x4D, 0xCD, 0x2D, 0xAD, 0x6D, 0xED, 0x1D, 0x9D, 0x5D, 0xDD, 0x3D, 0xBD, 0x7D, 0xFD,
+      0x03, 0x83, 0x43, 0xC3, 0x23, 0xA3, 0x63, 0xE3, 0x13, 0x93, 0x53, 0xD3, 0x33, 0xB3, 0x73, 0xF3,
+      0x0B, 0x8B, 0x4B, 0xCB, 0x2B, 0xAB, 0x6B, 0xEB, 0x1B, 0x9B, 0x5B, 0xDB, 0x3B, 0xBB, 0x7B, 0xFB,
+      0x07, 0x87, 0x47, 0xC7, 0x27, 0xA7, 0x67, 0xE7, 0x17, 0x97, 0x57, 0xD7, 0x37, 0xB7, 0x77, 0xF7,
+      0x0F, 0x8F, 0x4F, 0xCF, 0x2F, 0xAF, 0x6F, 0xEF, 0x1F, 0x9F, 0x5F, 0xDF, 0x3F, 0xBF, 0x7F, 0xFF };
+    return rev_table[n];
+}
 
 void PPU::memory_write(u16 address, u8 value) noexcept
 {
     if      (address < 0x2000) mem_pointers.cartridge->write_video_memory(address, value);
-    else if (address < 0x3F00) ram[address - 0x2000] = value;
+    else if (address < 0x3F00) ram[address % 0x800] = value;
     else if (address < 0x4000)
     {
         if ((address & 0x13) == 0x10) address &= ~0x10;
@@ -18,7 +41,7 @@ void PPU::memory_write(u16 address, u8 value) noexcept
 u8 PPU::memory_read(u16 address) const noexcept
 {
     if      (address < 0x2000) return mem_pointers.cartridge->read_video_memory(address);
-    else if (address < 0x3F00) return ram[address - 0x2000];
+    else if (address < 0x3F00) return ram[address % 0x800];
     else
     {
         if ((address & 0x13) == 0x10) address &= ~0x10;
@@ -26,9 +49,11 @@ u8 PPU::memory_read(u16 address) const noexcept
     }
 }
 
+void PPU::set_cpu_nmi(bool nmi) noexcept {mem_pointers.cpu->set_nmi(nmi);}
+
 void PPU::render_pixel() noexcept
 {
-    static constexpr unsigned nesRgb[] =
+    static constexpr unsigned rgb_table[] =
     { 0x7C7C7C, 0x0000FC, 0x0000BC, 0x4428BC, 0x940084, 0xA80020, 0xA81000, 0x881400,
       0x503000, 0x007800, 0x006800, 0x005800, 0x004058, 0x000000, 0x000000, 0x000000,
       0xBCBCBC, 0x0078F8, 0x0058F8, 0x6844FC, 0xD800CC, 0xE40058, 0xF83800, 0xE45C10,
@@ -38,157 +63,135 @@ void PPU::render_pixel() noexcept
       0xFCFCFC, 0xA4E4FC, 0xB8B8F8, 0xD8B8F8, 0xF8B8F8, 0xF8A4C0, 0xF0D0B0, 0xFCE0A8,
       0xF8D878, 0xD8F878, 0xB8F8B8, 0xB8F8D8, 0x00FCFC, 0xF8D8F8, 0x000000, 0x000000 };
 
-    const int x = clks - 2;
-    if (scanline < 240 && x >= 0 && x < 256)
-    {
-        if (!(mask & MASK_MASK_RENDERING_ENABLED)) {framebuffer[scanline * 256 + x] = 0xFFFFFF; return;}
-        if (   (mask & MASK_MASK_SHOW_BACKGROUND) &&
-            !(!(mask & MASK_MASK_SHOW_BACKGROUND_LEFTMOST_8_PIXELS) && x < 8))
-        {
-            auto pal = (((bg_shift_hi >> (15 - xfine)) & 1) << 1) |
-                        ((bg_shift_lo >> (15 - xfine)) & 1);
-            if (pal)
-                pal |= (((at_shift_hi >> (7 - xfine)) & 1)  << 1 |
-                        ((at_shift_lo >> (7 - xfine)) & 1)) << 2;
-            framebuffer[scanline * 256 + x] = nesRgb[memory_read(0x3F00 + pal)];
-        }
-    }
-}
+    const auto x = clks - 2;
+    u16 pal;
 
-void PPU::sprite_processing() noexcept
-{
-    if (clks >= 257 && clks <= 320) oam_addr = 0;
-    if (scanline < 240)
-    {
-        if (clks ==  0)
-        {
-            oam_addr_overflow = scan_oam_addr_overflow = sprite_overflow_detection = false;
-            scan_oam_addr = 0;
-        }
-        else if (clks <  65) scan_oam[(clks - 1) / 2] = 255;
-        else if (clks < 257) sprite_evaluation();
-        else if (clks < 321) sprite_fetches();
-    }
-}
-
-void PPU::sprite_evaluation() noexcept
-{
-    if (clks & 1) oam_data = oam[oam_addr];
+    if (!(mask & MASK_MASK_RENDERING_ENABLED)) pal = (~vaddr & 0x3F00) ? 0 : vaddr & 0x1F;
     else
     {
-        const bool in_range = scanline - oam_data < (ctrl & CTRL_MASK_SPRITE_SIZE ? 16 : 8);
-        if (oam_addr_overflow || scan_oam_addr_overflow)
-            oam_data = scan_oam[scan_oam_addr];
-        else
-            scan_oam[scan_oam_addr] = oam_data;
-        if (oam_copy)
-        {
-            --oam_copy;
-            increment_oam_addrs();
+        unsigned       bg_pat;
+
+        bool           spr_behind_bg, spr_is_s0;
+        unsigned       spr_pal;
+        const unsigned spr_pat = sprite_pixel(spr_pal, spr_behind_bg, spr_is_s0);
+
+        if (!(mask & MASK_MASK_SHOW_BACKGROUND) || (!(mask & MASK_MASK_SHOW_BACKGROUND_LEFTMOST_8_PIXELS) && x < 8))
+            bg_pat = 0;
+        else {
+            bg_pat = ((bg_shift_hi >> (15 - xfine) & 1) << 1) |
+                      (bg_shift_lo >> (15 - xfine) & 1);
+
+            if (spr_pat && spr_is_s0 && bg_pat && x != 255)
+                stat |= 0x40;
         }
-        else
-        {
-            if (in_range && !(oam_addr_overflow || scan_oam_addr_overflow))
-            {
-                oam_copy = 3;
-                increment_oam_addrs();
-            }
+
+        if (spr_pat && !(spr_behind_bg && bg_pat)) pal = 0x10 + (spr_pal << 2) + spr_pat;
+        else {
+            if (!bg_pat) pal = 0;
             else
             {
-                if (!sprite_overflow_detection)
-                {
-                    oam_addr += 4; oam_addr &= 0xFC;
-                    if (!oam_addr)
-                        oam_addr_overflow = true;
-                }
-                else
-                {
-                    if (in_range && !scan_oam_addr_overflow)
-                    {
-                        stat |= 0x40;
-                        sprite_overflow_detection = false;
-                    }
-                    else
-                    {
-                        oam_addr = ((oam_addr + 4) & 0xFC) | ((oam_addr + 1) & 3);
-                        if ((oam_addr & 0xFC) == 0)
-                            oam_addr_overflow = true;
-                    }
-                }
+                const unsigned attr = ((at_shift_hi >> (7 - xfine) & 1) << 1) |
+                                       (at_shift_lo >> (7 - xfine) & 1);
+                pal = (attr << 2) | bg_pat;
             }
         }
     }
+
+    framebuffer[scanline * 256 + x] = rgb_table[memory_read(0x3F00 + pal)];
 }
 
-void PPU::sprite_fetches() noexcept
+void PPU::sprite_operations() noexcept
 {
-    switch (clks % 8)
-    {
-        case 1: latch_sprite_y  = scan_oam[scan_oam_addr++]; scan_oam_addr &= 0x1F; break;
-        case 2: latch_sprite_id = scan_oam[scan_oam_addr++]; scan_oam_addr &= 0x1F; break;
-        case 3: latch_sprite_attr[(clks - 257) / 8] = scan_oam[scan_oam_addr++]; scan_oam_addr &= 0x1F; break;
-        case 4: latch_sprite_x   [(clks - 257) / 8] = scan_oam[scan_oam_addr++]; scan_oam_addr &= 0x1F; break;
-        case 5: break;
-        case 6: break;
-        case 7: break;
-        case 0: break;
-    }
-}
-
-void PPU::background_processing() noexcept
-{
-    if (scanline < 240 || scanline == 261)
-    {
-        background_fetches();
-        scroll_evaluation();
-    }
-}
-
-void PPU::background_fetches() noexcept
-{
-    if (scanline < 240 || scanline == 261)
+    if (scanline < 240)
     {
         switch (clks)
         {
-            case   0:                                     break;
-            case   1: open_bus_addr = addr_nt();          break;
-            case 256: bg_hi = memory_read(open_bus_addr); break;
-            case 321:
-            case 339: open_bus_addr = addr_nt();          break;
-            case 338: nt = memory_read(open_bus_addr);    break;
-            case 340: nt = memory_read(open_bus_addr);    break;
+            case 257: scan_oam_addr = 0; sprite_loading(); break;
+            case   0:                                      break;
+            case   1:
+                scan_oam_addr = oam_addr_overflow = scan_oam_addr_overflow = sprite_overflow_detection = 0;
+                scan_oam[(clks - 1) / 2] = 255;
+            break;
             default:
-                if (clks <= 255 || clks >= 322 || (clks & ~3))
-                {
-                    switch (clks % 8)
-                    {
-                        case 1: open_bus_addr = addr_nt(); break;
-                        case 3: open_bus_addr = addr_at(); break;
-                        case 5: open_bus_addr = addr_bg(); break;
-                        case 7: open_bus_addr += 8;        break;
-                        case 2: nt    = memory_read(open_bus_addr);                           break;
-                        case 4: at    = memory_read(open_bus_addr); if (vaddr & 64) at >>= 4;
-                                                                    if (vaddr &  2) at >>= 2; break;
-                        case 6: bg_lo = memory_read(open_bus_addr); break;
-                        case 0: bg_hi = memory_read(open_bus_addr); break;
-                    }
-                }
+                     if (clks <  65) scan_oam[(clks - 1) / 2] = 255;
+                else if (clks < 257)  sprite_evaluation();
+                else if (clks < 321) {sprite_loading(); oam_addr = 0;}
             break;
         }
     }
 }
 
-void PPU::scroll_evaluation() noexcept
+void PPU::sprite_evaluation() noexcept
 {
+    switch (clks & 1)
+    {
+        case 1: oam_tmp = oam[oam_addr]; break;
+        case 0:
+        {
+            const bool in_range = scanline - oam_tmp < (ctrl & CTRL_MASK_SPRITE_SIZE ? 16 : 8);
+            if (!scan_oam_addr_overflow && !oam_addr_overflow)
+                scan_oam[scan_oam_addr] = oam_tmp;
+            else 
+                oam_tmp = scan_oam[scan_oam_addr];
+            if (oam_copy > 0)
+            {
+                --oam_copy;
+                if (!(++     oam_addr &= 0xFF))      oam_addr_overflow = true;
+                if (!(++scan_oam_addr &= 0x1F)) scan_oam_addr_overflow = sprite_overflow_detection = true;
+            }
+            else if (in_range && !scan_oam_addr_overflow && !oam_addr_overflow)
+            {
+                oam_copy = 3;
+                if (!(++oam_addr &= 0xFF)) oam_addr_overflow = true;
+                 ++scan_oam_addr;
+            }
+            else if (sprite_overflow_detection)
+            {
+                if (in_range && !oam_addr_overflow) {stat |= 0x20; sprite_overflow_detection = false;}
+                else 
+                {
+                    oam_addr = ((oam_addr + 4) & 0xFC) | ((oam_addr + 1) & 3);
+                    if ((oam_addr & 0xFC) == 0) oam_addr_overflow = true;
+                }
+            }
+            else
+            {
+                     oam_addr += 4; oam_addr &= 0xFC;
+                if (!oam_addr)      oam_addr_overflow = true;
+            }
+        break;
+        }
+    }
+}
+
+void PPU::sprite_loading() noexcept
+{
+    switch (const auto spr_index = (clks - 257) / 8; clks % 8)
+    {
+        case 1: sprite.y  = scan_oam[scan_oam_addr++]; scan_oam_addr &= 0x1F; break;
+        case 2: sprite.id = scan_oam[scan_oam_addr++]; scan_oam_addr &= 0x1F; break;
+        case 3: sprite.attr[spr_index] = scan_oam[scan_oam_addr++]; scan_oam_addr &= 0x1F; break;
+        case 4: sprite.x   [spr_index] = scan_oam[scan_oam_addr++]; scan_oam_addr &= 0x1F; break;
+        case 5: sprite.in_range = sprite_tile_address<0>(sprite.attr[spr_index]); break;
+        case 7: sprite.in_range = sprite_tile_address<1>(sprite.attr[spr_index]); break;
+        case 6: fetch_sprite_pattern<0>(spr_index); break;
+        case 0: fetch_sprite_pattern<1>(spr_index); break;
+    }
+}
+
+void PPU::background_misc() noexcept
+{
+    if (scanline >= 240 && scanline != 261) return;
     switch (clks)
     {
-        case   0: break;
-        case   1: break;
-        case 256: shift_shifters();                      v_scroll(); break;
-        case 257: shift_shifters(); reload_shift_regs(); h_update(); break;
-        case 338: break;
-        case 339: break;
-        case 340: break;
+        case   0:                                                                   break;
+        case   1: open_bus_addr = addr_nt();                                        break;
+        case 256: shift_shifters(); bg_hi = memory_read(open_bus_addr); v_scroll(); break;
+        case 257: shift_shifters(); reload_shift_regs();                h_update(); break;
+        case 321: open_bus_addr = addr_nt();                                        break;
+        case 339: open_bus_addr = addr_nt();                                        break;
+        case 338: nt = memory_read(open_bus_addr);                                  break;
+        case 340: nt = memory_read(open_bus_addr); if (scanline == 261 && odd_frame_post) ++clks;   break;
         default:
             if (scanline  == 261 && clks >= 280 && clks <= 304) v_update();
             else if (clks <= 255 || clks >= 322)
@@ -196,8 +199,15 @@ void PPU::scroll_evaluation() noexcept
                 shift_shifters();
                 switch (clks % 8)
                 {
-                    case 1: reload_shift_regs(); break;
-                    case 0: h_scroll();          break;
+                    case 1: open_bus_addr = addr_nt(); reload_shift_regs();               break;
+                    case 3: open_bus_addr = addr_at();                                    break;
+                    case 5: open_bus_addr = addr_bg();                                    break;
+                    case 7: open_bus_addr += 8;                                           break;
+                    case 2: nt    = memory_read(open_bus_addr);                           break;
+                    case 4: at    = memory_read(open_bus_addr); if (vaddr & 64) at >>= 4;
+                                                                if (vaddr &  2) at >>= 2; break;
+                    case 6: bg_lo = memory_read(open_bus_addr);                           break;
+                    case 0: bg_hi = memory_read(open_bus_addr); h_scroll();               break;
                 }
             }
         break;
@@ -206,19 +216,30 @@ void PPU::scroll_evaluation() noexcept
 
 void PPU::tick() noexcept
 {
+    if (scanline < 240 && clks >= 2 && clks <= 257)
+        render_pixel();
     if (!--open_bus_decay_timer) open_bus_data = 0;
     switch (scanline)
     {
-        case 241: if (clks == 1) stat |=  0x80;          break;
-        case 261: if (clks == 1) stat &= ~0x80;          break;
-        case 240: if (clks == 0) new_frame_post = true;  break;
+        case 241: if (clks == 0) {stat |= 0x80; if (ctrl & 0x80) set_cpu_nmi(true);} break;
+        case 261:
+            switch (clks)
+            {
+                case 0: stat &= ~0x20; break;
+                case 1: stat &= ~0xC0; break;
+            }
+        break;
+        case 240: if (clks == 0) new_frame_post = true; break;
     }
-    if (rendering_enabled())
+    if (mask & MASK_MASK_RENDERING_ENABLED)
     {
-        render_pixel();
-        background_processing();
-        sprite_processing();
+        sprite_operations();
+        background_misc();
     }
-    next_cycle();
+    if (++clks > 340)
+    {
+        if (++scanline == 262) {scanline = 0; odd_frame_post = !odd_frame_post;}
+        clks -= 341;
+    }
 }
 

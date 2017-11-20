@@ -1,5 +1,249 @@
 
     /*
+    const int x = clks - 2;
+    if (!(mask & MASK_MASK_RENDERING_ENABLED)) {framebuffer[scanline * 256 + x] = 0xFFFFFF; return;}
+    if (scanline < 240 && x >= 0 && x <= 256)
+    {
+        bool           spr_behind_bg, spr_is_s0 = false;
+        unsigned       spr_pal;
+        unsigned const spr_pat = get_sprite_pixel(spr_pal, spr_behind_bg, spr_is_s0);
+        unsigned pal = 0, pal_index;
+
+        if (   (mask & MASK_MASK_SHOW_BACKGROUND) &&
+            !(!(mask & MASK_MASK_SHOW_BACKGROUND_LEFTMOST_8_PIXELS) && x < 8))
+        {
+            pal = (((bg_shift_hi >> (15 - xfine)) & 1) << 1) |
+                        ((bg_shift_lo >> (15 - xfine)) & 1);
+            //if (pal)
+            //    pal |= (((at_shift_hi >> (7 - xfine)) & 1)  << 1 |
+            //            ((at_shift_lo >> (7 - xfine)) & 1)) << 2;
+
+            if (spr_is_s0)
+                std::clog << spr_pat << ' ' << spr_is_s0 << ' ' << pal << ' ' << std::endl;
+            if (spr_pat && spr_is_s0 && pal && x != 255)
+            {
+                std::clog << "HIT" << std::endl;
+                stat |= 0x40;
+            }
+        }
+
+        if (spr_pat && !(spr_behind_bg && pal))
+            pal_index = 0x10 + (spr_pal << 2) + spr_pat;
+        else {
+            if (!pal)
+                pal_index = 0;
+            else {
+                unsigned const attr_bits = ((at_shift_hi >> (7 - xfine) & 1) << 1) |
+                                            (at_shift_lo >> (7 - xfine) & 1);
+                pal_index = (attr_bits << 2) | pal;
+            }
+        }
+
+    }*/
+            /*
+                std::clog << scanline << ' ' << clks << ' ' << odd_frame_post << std::endl;
+            if (open_bus_data & MASK_MASK_RENDERING_ENABLED)
+            {
+
+                if (scanline == 0 && odd_frame_post && clks == 0)
+                {
+                    clks = 1;
+                    if (++scanline == 262) {scanline = 0; odd_frame_post = !odd_frame_post;}
+                }
+                //if (scanline == 262 && clks >= 340 && odd_frame_post) ++clks;
+            }*/
+            /*
+            if (~ctrl & stat & open_bus_data & 0x80)
+            {
+                if (!(scanline == 261 && clks == 1)) set_cpu_nmi(true);
+            }
+            else set_cpu_nmi(false);
+            if (open_bus_data & 0x80)
+            {
+                if (stat & 0x80)
+                {
+                    if (~ctrl & 0x80) set_cpu_nmi(true);
+                    if (scanline == 261 && clks == 1) set_cpu_nmi(false);
+                }
+            }
+            else
+                set_cpu_nmi(false);*/
+
+    /*
+    if (odd_frame_post)
+    {
+        if (scanline == 261 && clks == 0) {stat &= ~0xA0;}
+    }
+    else
+    {
+        if (scanline == 261 && clks == 1) {stat &= ~0xA0;}
+    }*/
+    //if (scanline == 241 && clks == 1) if (!suppress_nmi) {stat |= 0x80; set_cpu_nmi(ctrl & 0x80);}
+    /*
+    {
+        auto cartridge{nes::emulator::Cartridge::load("res/roms/cpu_dummy_reads.nes")};
+        nes::emulator::CPU cpu;
+        nes::emulator::PPU ppu;
+        nes::emulator::APU apu;
+        unsigned char internal_ram[0x0800];
+
+        nes::emulator::CPU::MemPointers mem_pointers;
+        mem_pointers.internal_ram   = internal_ram;
+        mem_pointers.ppu            = &ppu;
+        mem_pointers.cartridge      = &cartridge;
+
+        nes::emulator::PPU::MemPointers mem_pointers_ppu;
+        mem_pointers_ppu.cartridge      = &cartridge;
+        mem_pointers_ppu.cpu            = &cpu;
+
+        nes::emulator::APU::MemPointers mem_pointers_apu;
+        mem_pointers_apu.cpu = &cpu;
+
+        cpu.set_mem_pointers(mem_pointers);
+        ppu.set_mem_pointers(mem_pointers_ppu);
+        apu.set_mem_pointers(mem_pointers_apu);
+
+        while (cartridge.read_ram(1) != 0xDE ||
+               cartridge.read_ram(2) != 0xB0 || 
+               cartridge.read_ram(3) != 0x61 ||
+               cartridge.read_ram(0) >= 0x80)
+        {
+            cpu.instruction();
+        }
+        char c;
+        for (int i = 4; (c = cartridge.read_ram(i++));)
+            std::clog << c;
+        std::clog << std::endl << std::endl;
+    }*/
+        //bool oam_addr_overflow, scan_oam_addr_overflow, sprite_overflow_detection;
+
+        void increment_oam_addrs() noexcept
+        {
+            ++     oam_addr;      oam_addr &= 0xFF;
+            ++scan_oam_addr; scan_oam_addr &= 0x1F;
+
+            if (!     oam_addr)      oam_addr_overflow = true;
+            if (!scan_oam_addr) scan_oam_addr_overflow = sprite_overflow_detection = true;
+        }
+
+        unsigned char latch_sprite_x[8], latch_sprite_attr[8], latch_sprite_id, latch_sprite_y;
+
+void PPU::sprite_processing() noexcept
+{
+    if (clks >= 257 && clks <= 320) oam_addr = 0;
+    if (scanline < 240)
+    {
+        if (clks ==  0)
+        {
+            oam_addr_overflow = scan_oam_addr_overflow = sprite_overflow_detection = false;
+            scan_oam_addr = 0;
+        }
+        else if (clks <  65) scan_oam[(clks - 1) / 2] = 255;
+        else if (clks < 257) sprite_evaluation();
+        else if (clks < 321) sprite_fetches();
+    }
+}
+
+void PPU::sprite_evaluation() noexcept
+{
+    if (clks & 1) oam_data = oam[oam_addr];
+    else
+    {
+        const bool in_range = scanline - oam_data < (ctrl & CTRL_MASK_SPRITE_SIZE ? 16 : 8);
+        if (oam_addr_overflow || scan_oam_addr_overflow)
+            oam_data = scan_oam[scan_oam_addr];
+        else
+            scan_oam[scan_oam_addr] = oam_data;
+        if (oam_copy)
+        {
+            --oam_copy;
+            increment_oam_addrs();
+        }
+        else
+        {
+            if (in_range && !(oam_addr_overflow || scan_oam_addr_overflow))
+            {
+                oam_copy = 3;
+                increment_oam_addrs();
+            }
+            else
+            {
+                if (!sprite_overflow_detection)
+                {
+                    oam_addr += 4; oam_addr &= 0xFC;
+                    if (!oam_addr)
+                        oam_addr_overflow = true;
+                }
+                else
+                {
+                    if (in_range && !scan_oam_addr_overflow)
+                    {
+                        stat |= 0x40;
+                        sprite_overflow_detection = false;
+                    }
+                    else
+                    {
+                        oam_addr = ((oam_addr + 4) & 0xFC) | ((oam_addr + 1) & 3);
+                        if ((oam_addr & 0xFC) == 0)
+                            oam_addr_overflow = true;
+                    }
+                }
+            }
+        }
+    }
+}
+
+void PPU::sprite_fetches() noexcept
+{
+    switch (clks % 8)
+    {
+        case 1: latch_sprite_y  = scan_oam[scan_oam_addr++]; scan_oam_addr &= 0x1F; break;
+        case 2: latch_sprite_id = scan_oam[scan_oam_addr++]; scan_oam_addr &= 0x1F; break;
+        case 3: latch_sprite_attr[(clks - 257) / 8] = scan_oam[scan_oam_addr++]; scan_oam_addr &= 0x1F; break;
+        case 4: latch_sprite_x   [(clks - 257) / 8] = scan_oam[scan_oam_addr++]; scan_oam_addr &= 0x1F; break;
+        case 5: break;
+        case 6: break;
+        case 7: break;
+        case 0: break;
+    }
+}
+
+void PPU::background_processing() noexcept
+{
+    if (scanline < 240 || scanline == 261)
+    {
+        background_fetches();
+        scroll_evaluation();
+    }
+}
+
+void PPU::background_fetches() noexcept
+{
+}
+
+void PPU::scroll_evaluation() noexcept
+{
+    switch (clks)
+    {
+        case   0:case   1:          break;
+        case 256: shift_shifters();                      v_scroll(); break;
+        case 257: shift_shifters(); reload_shift_regs(); h_update(); break;
+        case 338:case 339:case 340: break;
+        default:
+            if (scanline  == 261 && clks >= 280 && clks <= 304) v_update();
+            else if (clks <= 255 || clks >= 322)
+            {
+                shift_shifters();
+                switch (clks % 8)
+                {
+                    case 1: reload_shift_regs(); break;
+                    case 0: h_scroll();          break;
+                }
+            }
+        break;
+    }
+}
+    /*
             std::clog << std::left << std::setfill('0') << std::setw(4) << std::hex << PC << " ";
 
             std::clog << std::setw(2) << "A:" <<(unsigned) A << " X:" <<(unsigned) X << " Y:" << (unsigned) Y << " P:" << unsigned(P) << " S:" << (unsigned) S;

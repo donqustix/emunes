@@ -3,15 +3,14 @@
 #include "cartridge.h"
 #include "ppu.h"
 
+#include "third_party/apu_bisqwit.h"
+
 using namespace nes::emulator;
 
 void CPU::sync_hardware() noexcept
 {
-    PPU* const ppu = mem_pointers.ppu;
-    for (int i = 0; i < 3; ++i)
-    {
-        ppu->tick();set_nmi(ppu->nmi());
-    };
+    for (int i = 0; i < 3; ++i) mem_pointers.ppu->tick();
+    third_party::APU_bisqwit::tick(*this);
 }
 
 void CPU::wb(u16 address, u8 value) noexcept
@@ -37,11 +36,19 @@ void CPU::wb(u16 address, u8 value) noexcept
     }
     else if (address < 0x4018) // apu and I/O registers
     {
-        if (address == 0x4014) oam_dma(value);
+        switch (address)
+        {
+            case 0x4014: oam_dma(value);                                     break;
+            case 0x4015: third_party::APU_bisqwit::Write(0x15, value);       break;
+            case 0x4016:                                                     break;
+            case 0x4017:
+            default: third_party::APU_bisqwit::Write(address & 0x1F, value); break;
+        }
     }
     else if (address < 0x4020); // normally disabled
     else if (address < 0x6000); // cartridge space
     else if (address < 0x8000) mem_pointers.cartridge->write_ram(address - 0x6000, value);
+    //else mem_pointers.cartridge->write_mapper(value);
 }
 
 u8 CPU::rb(u16 address) noexcept
@@ -62,13 +69,17 @@ u8 CPU::rb(u16 address) noexcept
             case  5: return mem_pointers.ppu->reg_read<5>();
             case  6: return mem_pointers.ppu->reg_read<6>();
             case  7: return mem_pointers.ppu->reg_read<7>();
-            default: return 0;
         }
-    else if (address < 0x4018) return 0; // apu and I/O registers
+    else if (address < 0x4018) // apu and I/O registers
+    {
+        if (address == 0x4015) return third_party::APU_bisqwit::Read(*this);
+    }
     else if (address < 0x4020) return 0; // normally disabled
     else if (address < 0x8000) return 0;
     else if (address < 0xC000) return mem_pointers.cartridge->read_rom(address - 0x8000);
     else return mem_pointers.cartridge->read_rom(address - 0xC000); // cartridge space
+
+    return 0;
 }
 
 void CPU::oam_dma(u8 value) noexcept
@@ -81,12 +92,14 @@ void CPU::oam_dma(u8 value) noexcept
 
 void CPU::instruction() noexcept
 {
-    u16 op = rb(PC++); PC &= 0xFFFF;
+    /*opcode fetch*/u16 op = rb(PC++); PC &= 0xFFFF;
 
-         if (reset)                     {op = 0x100; reset = false;           }
-    else if (nmi && !nmi_edge_detected) {op = 0x101; nmi_edge_detected = true;}
-    else if (irq && !(P & MI))          {op = 0x102;                          }
-    if (!nmi) nmi_edge_detected = false;
+    switch (const u16 i = pending_interrupt; i)
+    {
+        case RST: op = 0x100; break;
+        case NMI: op = 0x101; break;
+        case IRQ: op = 0x102; break; 
+    }
 
     switch (op)
     {
@@ -97,8 +110,8 @@ void CPU::instruction() noexcept
         case 0x44: nop(zp()); break;
         case 0x64: nop(zp()); break;
         case 0x05: ora(zp()); break;
-        case 0x65: adc(rb(zp())      ); break;
-        case 0xE5: adc(rb(zp()) ^ 255); break;
+        case 0x65: adc<0>(zp()); break;
+        case 0xE5: adc<1>(zp()); break;
         case 0x25: AND(zp()); break;
         case 0x24: bit(zp()); break;
         case 0xC5: cmp(zp()); break;
@@ -126,8 +139,8 @@ void CPU::instruction() noexcept
         case 0xD4: nop(zpx()); break;
         case 0xF4: nop(zpx()); break;
         case 0x15: ora(zpx()); break;
-        case 0x75: adc(rb(zpx())      ); break;
-        case 0xF5: adc(rb(zpx()) ^ 255); break;
+        case 0x75: adc<0>(zpx()); break;
+        case 0xF5: adc<1>(zpx()); break;
         case 0x35: AND(zpx()); break;
         case 0xD5: cmp(zpx()); break;
         case 0x55: eor(zpx()); break;
@@ -147,8 +160,8 @@ void CPU::instruction() noexcept
         case 0xAC: ldy(abs()); break;
         case 0x0C: nop(abs()); break;
         case 0x0D: ora(abs()); break;
-        case 0x6D: adc(rb(abs())      ); break;
-        case 0xED: adc(rb(abs()) ^ 255); break;
+        case 0x6D: adc<0>(abs()); break;
+        case 0xED: adc<1>(abs()); break;
         case 0x2D: AND(abs()); break;
         case 0x2C: bit(abs()); break;
         case 0xCD: cmp(abs()); break;
@@ -178,10 +191,10 @@ void CPU::instruction() noexcept
         case 0xFC: nop(abx()); break;
         case 0x1D: ora(abx()); break;
         case 0x19: ora(aby()); break;
-        case 0x7D: adc(rb(abx())      ); break;
-        case 0x79: adc(rb(aby())      ); break;
-        case 0xFD: adc(rb(abx()) ^ 255); break;
-        case 0xF9: adc(rb(aby()) ^ 255); break;
+        case 0x7D: adc<0>(abx()); break;
+        case 0x79: adc<0>(aby()); break;
+        case 0xFD: adc<1>(abx()); break;
+        case 0xF9: adc<1>(aby()); break;
         case 0x3D: AND(abx()); break;
         case 0x39: AND(aby()); break;
         case 0xDD: cmp(abx()); break;
@@ -201,8 +214,8 @@ void CPU::instruction() noexcept
 
         case 0xA1: lda(izx()); break;
         case 0x01: ora(izx()); break;
-        case 0x61: adc(rb(izx())      ); break;
-        case 0xE1: adc(rb(izx()) ^ 255); break;
+        case 0x61: adc<0>(izx()); break;
+        case 0xE1: adc<1>(izx()); break;
         case 0x21: AND(izx()); break;
         case 0xC1: cmp(izx()); break;
         case 0x41: eor(izx()); break;
@@ -210,8 +223,8 @@ void CPU::instruction() noexcept
 
         case 0xB1: lda(izy()); break;
         case 0x11: ora(izy()); break;
-        case 0x71: adc(rb(izy())      ); break;
-        case 0xF1: adc(rb(izy()) ^ 255); break;
+        case 0x71: adc<0>(izy()); break;
+        case 0xF1: adc<1>(izy()); break;
         case 0x31: AND(izy()); break;
         case 0xD1: cmp(izy()); break;
         case 0x51: eor(izy()); break;
@@ -227,9 +240,9 @@ void CPU::instruction() noexcept
         case 0xE2: nop(imm()); break;
         case 0x89: nop(imm()); break;
         case 0x09: ora(imm()); break;
-        case 0x69: adc(rb(imm())      ); break;
-        case 0xE9: adc(rb(imm()) ^ 255); break;
-        case 0xEB: adc(rb(imm()) ^ 255); break;
+        case 0x69: adc<0>(imm()); break;
+        case 0xE9: adc<1>(imm()); break;
+        case 0xEB: adc<1>(imm()); break;
         case 0x29: AND(imm()); break;
         case 0xC9: cmp(imm()); break;
         case 0xE0: cpx(imm()); break;

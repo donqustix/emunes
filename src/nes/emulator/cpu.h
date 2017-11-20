@@ -5,11 +5,23 @@
 
 namespace nes::emulator
 {
-    class PPU;
     class Cartridge;
+    class PPU;
+    class CPU;
 
+    namespace third_party::APU_bisqwit
+    {
+        typedef uint_least8_t   u8;
+        u8 Read(CPU& cpu);
+        void tick(CPU& cpu);
+        struct channel;
+    }
     class CPU final
     {
+        // yes, i'm lazy to make a wrapper
+        friend struct third_party::APU_bisqwit::channel;
+        friend third_party::APU_bisqwit::u8 third_party::APU_bisqwit::Read(CPU&);
+        friend void third_party::APU_bisqwit::tick(CPU&);
     public:
         struct MemPointers
         {
@@ -19,7 +31,7 @@ namespace nes::emulator
         };
 
     private:
-        enum InterruptType {NMI, RST, IRQ, BRK};
+        enum InterruptType : u16 {NuLL, NMI, RST, IRQ, BRK};
         enum FlagMasks : u8 {
             MC = 0b00000001,
             MZ = 0b00000010,
@@ -28,16 +40,16 @@ namespace nes::emulator
             MV = 0b01000000,
             MN = 0b10000000
         };
-        enum FlagShifts : u8 {
-            SC = 0, SZ, SI, SD, SB, SV = SB + 2, SN
-        };
+        enum FlagShifts : u8 {SC = 0, SZ, SI, SD, SB, SV = SB + 2, SN};
 
         MemPointers mem_pointers;
 
         u8   A = 0, X = 0, Y = 0, P = 0, S = 0;
         u16 PC = 0;
 
-        bool nmi = false, nmi_edge_detected = false, irq = false, reset = true;
+        InterruptType pending_interrupt = RST;
+
+        bool nmi = false, irq = false;
 
         void sync_hardware() noexcept;
 
@@ -57,7 +69,13 @@ namespace nes::emulator
             P &= ~MC; P |=                  t   >> 8 & MC;
         }
 
-        u16  zp() noexcept {const u16 a = rb(PC++); PC &= 0xFFFF; return a;}
+        void poll_int() noexcept
+        {
+                 if (nmi             ) {pending_interrupt = NMI; nmi = false;}
+            else if (irq && !(P & MI))  pending_interrupt = IRQ;
+        }
+
+        u16  zp() noexcept {const u16 a = rb(PC++);  PC &= 0xFFFF; return a;}
         u16 zpx() noexcept {const u16 a = zp(); rb(a); return (a + X) & 255;}
         u16 zpy() noexcept {const u16 a = zp(); rb(a); return (a + Y) & 255;}
         u16 abs() noexcept {u16 a = rb(PC++); PC &= 0xFFFF; a |= rb(PC++) << 8; PC &= 0xFFFF; return a;}
@@ -70,33 +88,35 @@ namespace nes::emulator
         u16 abx_big() noexcept {const u16 t = abs(), a = t + X; rb((a ^ t) & 256 ? a - 256 : a); return a & 0xFFFF;}
         u16 aby_big() noexcept {const u16 t = abs(), a = t + Y; rb((a ^ t) & 256 ? a - 256 : a); return a & 0xFFFF;}
         u16 izy_big() noexcept {u16 t = zp(), a  = rb(t++);      t &= 255;
-                                              a |= rb(t  ) << 8; a +=   Y; rb((a ^ t) & 256 ? a - 256 : a); return a & 0xFFFF;}
+                                              a |= rb(t  ) << 8; a +=   Y; rb((a ^ (a - Y)) & 256 ? a - 256 : a); return a & 0xFFFF;}
         u16 imm() noexcept {const u16 t = PC++; PC &= 0xFFFF; return t;}
 
-        void lda(u16 a) noexcept {A = rb(a); up_flag_nz(A);}
-        void ldx(u16 a) noexcept {X = rb(a); up_flag_nz(X);}
-        void ldy(u16 a) noexcept {Y = rb(a); up_flag_nz(Y);}
+        void lda(u16 a) noexcept {poll_int(); A = rb(a); up_flag_nz(A);}
+        void ldx(u16 a) noexcept {poll_int(); X = rb(a); up_flag_nz(X);}
+        void ldy(u16 a) noexcept {poll_int(); Y = rb(a); up_flag_nz(Y);}
 
-        void sta(u16 a) noexcept {wb(a, A);}
-        void stx(u16 a) noexcept {wb(a, X);}
-        void sty(u16 a) noexcept {wb(a, Y);}
+        void sta(u16 a) noexcept {poll_int(); wb(a, A);}
+        void stx(u16 a) noexcept {poll_int(); wb(a, X);}
+        void sty(u16 a) noexcept {poll_int(); wb(a, Y);}
 
-        void AND(u16 a) noexcept {up_flag_nz(A &= rb(a));}
-        void ora(u16 a) noexcept {up_flag_nz(A |= rb(a));}
-        void eor(u16 a) noexcept {up_flag_nz(A ^= rb(a));}
+        void AND(u16 a) noexcept {poll_int(); up_flag_nz(A &= rb(a));}
+        void ora(u16 a) noexcept {poll_int(); up_flag_nz(A |= rb(a));}
+        void eor(u16 a) noexcept {poll_int(); up_flag_nz(A ^= rb(a));}
 
-        void nop(u16 a) noexcept {rb(a);}
+        void nop(u16 a) noexcept {poll_int(); rb(a);}
 
         void lsr(u16 a) noexcept
         {
-            u8 t = rb(a); wb(a, t      ); P &= ~MC; P |= t & MC; 
+            u8 t = rb(a); wb(a, t      ); P &= ~MC; P |= t & MC;
+            poll_int(); 
                           wb(a, t >>= 1);
             up_flag_nz(t);
         }
 
         void asl(u16 a) noexcept
         {
-            u8 t = rb(a); wb(a,  t                 ); P &= ~MC; P |= t >> 7; 
+            u8 t = rb(a); wb(a,  t                 ); P &= ~MC; P |= t >> 7;
+            poll_int();
                           wb(a, (t <<= 1, t &= 255));
             up_flag_nz(t);
         }
@@ -105,6 +125,7 @@ namespace nes::emulator
         {
                   u8 t =  rb(a);
             const u8 c = t >> 7; wb(a,  t                                 );
+            poll_int();
                                  wb(a, (t <<= 1, t &= 255, t |= flags(MC)));
             up_flag_nz(t); P &= ~MC; P |= c;
         }
@@ -113,87 +134,95 @@ namespace nes::emulator
         {
                   u8 t =  rb(a);
             const u8 c = t & MC; wb(a,  t                            );
+            poll_int();
                                  wb(a, (t >>= 1, t |= flags(MC) << 7));
             up_flag_nz(t); P &= ~MC; P |= c;
         }
 
         void bit(u16 a) noexcept
         {
-            const u8 d = rb(a); P &= ~MZ; P |= !(A &  d) << SZ;
-                                P &= ~MV; P |=   d & MV;
-                                P &= ~MN; P |=   d & MN;
+                          poll_int();
+            const u8 d  = rb(a);
+            P &= ~MZ;   P |= !(A &  d) << SZ;
+            P &= ~MV;   P |=   d & MV;
+            P &= ~MN;   P |=   d & MN;
         }
 
-        void cmp(u16 a) noexcept {const u8 d = rb(a); up_flag_nz((A - d) & 255); P &= ~MC; P |= A >= d;}
-        void cpx(u16 a) noexcept {const u8 d = rb(a); up_flag_nz((X - d) & 255); P &= ~MC; P |= X >= d;}
-        void cpy(u16 a) noexcept {const u8 d = rb(a); up_flag_nz((Y - d) & 255); P &= ~MC; P |= Y >= d;}
+        void cmp(u16 a) noexcept {poll_int(); const u8 d = rb(a); up_flag_nz((A - d) & 255); P &= ~MC; P |= A >= d;}
+        void cpx(u16 a) noexcept {poll_int(); const u8 d = rb(a); up_flag_nz((X - d) & 255); P &= ~MC; P |= X >= d;}
+        void cpy(u16 a) noexcept {poll_int(); const u8 d = rb(a); up_flag_nz((Y - d) & 255); P &= ~MC; P |= Y >= d;}
 
-        void dec(u16 a) noexcept {u8 t = rb(a); wb(a, t--); wb(a, t &= 255); up_flag_nz(t);}
-        void inc(u16 a) noexcept {u8 t = rb(a); wb(a, t++); wb(a, t &= 255); up_flag_nz(t);}
+        void dec(u16 a) noexcept {u8 t = rb(a); wb(a, t--); poll_int(); wb(a, t &= 255); up_flag_nz(t);}
+        void inc(u16 a) noexcept {u8 t = rb(a); wb(a, t++); poll_int(); wb(a, t &= 255); up_flag_nz(t);}
 
-        void adc(u8 d) noexcept
+        template<bool inv>
+        void adc(u16 a) noexcept
         {
-            const u16 t = A + d + flags(MC); up_flag_cv(A, d, t      );
-                                             up_flag_nz(A   = t & 255);
+            poll_int();  u8   d = rb(a); if constexpr (inv) d ^= 255;
+            const u16 t = A + d + flags(MC);
+            up_flag_cv(A, d, t      );
+            up_flag_nz(A   = t & 255);
         }
 
-        void lsr_a() noexcept {rb(PC); P &= ~MC; P |= A & MC; up_flag_nz( A >>= 1           );}
-        void asl_a() noexcept {rb(PC); P &= ~MC; P |= A >> 7; up_flag_nz((A <<= 1, A &= 255));}
+        void lsr_a() noexcept {poll_int(); rb(PC); P &= ~MC; P |= A & MC; up_flag_nz( A >>= 1           );}
+        void asl_a() noexcept {poll_int(); rb(PC); P &= ~MC; P |= A >> 7; up_flag_nz((A <<= 1, A &= 255));}
 
         void ror_a() noexcept
         {
-            rb(PC);     const u8 c = A & MC;
-            up_flag_nz((A >>= 1, A |= flags(MC) << 7));
+            poll_int();    rb(PC);
+            const u8  c  = A & MC; up_flag_nz((A >>= 1, A |= flags(MC) << 7));
             P &= ~MC; P |= c;
         }
         void rol_a() noexcept
         {
-            rb(PC);     const u8 c = A >> 7;
-            up_flag_nz((A <<= 1, A &= 255, A |= flags(MC)));
+            poll_int();    rb(PC);
+            const u8  c  = A >> 7; up_flag_nz((A <<= 1, A &= 255, A |= flags(MC)));
             P &= ~MC; P |= c;
         }
 
-        void clc() noexcept {rb(PC); P &= ~MC;}
-        void cld() noexcept {rb(PC); P &= ~MD;}
-        void clv() noexcept {rb(PC); P &= ~MV;}
-        void cli() noexcept {rb(PC); P &= ~MI;}
+        void clc() noexcept {poll_int(); rb(PC); P &= ~MC;}
+        void cld() noexcept {poll_int(); rb(PC); P &= ~MD;}
+        void clv() noexcept {poll_int(); rb(PC); P &= ~MV;}
+        void cli() noexcept {poll_int(); rb(PC); P &= ~MI;}
 
-        void sei() noexcept {rb(PC); P |= MI;}
-        void sec() noexcept {rb(PC); P |= MC;}
-        void sed() noexcept {rb(PC); P |= MD;}
+        void sei() noexcept {poll_int(); rb(PC); P |= MI;}
+        void sec() noexcept {poll_int(); rb(PC); P |= MC;}
+        void sed() noexcept {poll_int(); rb(PC); P |= MD;}
 
-        void dex() noexcept {rb(PC); up_flag_nz(--X &= 255);}
-        void dey() noexcept {rb(PC); up_flag_nz(--Y &= 255);}
+        void dex() noexcept {poll_int(); rb(PC); up_flag_nz(--X &= 255);}
+        void dey() noexcept {poll_int(); rb(PC); up_flag_nz(--Y &= 255);}
 
-        void inx() noexcept {rb(PC); up_flag_nz(++X &= 255);}
-        void iny() noexcept {rb(PC); up_flag_nz(++Y &= 255);}
+        void inx() noexcept {poll_int(); rb(PC); up_flag_nz(++X &= 255);}
+        void iny() noexcept {poll_int(); rb(PC); up_flag_nz(++Y &= 255);}
 
-        void tax() noexcept {rb(PC); X = A; up_flag_nz(X);}
-        void tay() noexcept {rb(PC); Y = A; up_flag_nz(Y);}
-        void tya() noexcept {rb(PC); A = Y; up_flag_nz(A);}
-        void tsx() noexcept {rb(PC); X = S; up_flag_nz(X);}
-        void txs() noexcept {rb(PC); S = X;}
-        void txa() noexcept {rb(PC); A = X; up_flag_nz(A);}
+        void tax() noexcept {poll_int(); rb(PC); X = A; up_flag_nz(X);}
+        void tay() noexcept {poll_int(); rb(PC); Y = A; up_flag_nz(Y);}
+        void tya() noexcept {poll_int(); rb(PC); A = Y; up_flag_nz(A);}
+        void tsx() noexcept {poll_int(); rb(PC); X = S; up_flag_nz(X);}
+        void txs() noexcept {poll_int(); rb(PC); S = X;}
+        void txa() noexcept {poll_int(); rb(PC); A = X; up_flag_nz(A);}
 
-        void pha() noexcept {rb(PC); push(A);}
-        void php() noexcept {rb(PC); push(P | 0x30);}
+        void pha() noexcept {rb(PC); poll_int(); push(A);}
+        void php() noexcept {rb(PC); poll_int(); push(P | 0x30);}
 
-        void pla() noexcept {rb(PC); sync_hardware(); up_flag_nz(A = pop());}
-        void plp() noexcept {rb(PC); sync_hardware(); P = pop() & 0xEF;}
+        void pla() noexcept {rb(PC); sync_hardware(); poll_int(); up_flag_nz(A = pop());}
+        void plp() noexcept {rb(PC); sync_hardware(); poll_int(); P = pop() & 0xEF;}
 
-        void rti() noexcept {plp(); PC = pop() | pop() << 8;}
-        void rts() noexcept {rb(PC); sync_hardware(); PC = pop() | pop() << 8; sync_hardware(); ++PC &= 0xFFFF;}
+        void rti() noexcept {rb(PC); sync_hardware();  P = pop() & 0xEF;       PC = pop(); poll_int();    PC |= pop() << 8;}
+        void rts() noexcept {rb(PC); sync_hardware(); PC = pop() | pop() << 8; poll_int(); sync_hardware(); ++PC &= 0xFFFF;}
 
         void rel(bool cond) noexcept
         {
-            const u8 j = rb(PC++); PC &= 0xFFFF;
+            poll_int(); const u8 j = rb(PC++); PC &= 0xFFFF;
             if (cond)
             {
-                rb(PC); PC += j; PC &= 0xFFFF;
-                if (j & 0x80)
+                const u16 temp = PC + ((j ^ 128) - 128);
+                rb(PC);
+                if ((temp ^ PC) & 256)
                 {
-                    rb(PC); PC -= 256;
+                    poll_int(); rb((PC & 0xFF00) | (temp & 0x00FF));
                 }
+                PC = temp & 0xFFFF;
             }
         }
 
@@ -206,8 +235,8 @@ namespace nes::emulator
         void bvs() noexcept {rel( flags(MV));}
         void bvc() noexcept {rel(!flags(MV));}
 
-        void jmp_ind() noexcept {const u16 t = abs(); PC = rb(t) | rb((t & 0xFF00) | ((t + 1) & 0xFF)) << 8;}
-        void jmp_abs() noexcept {PC = abs();}
+        void jmp_ind() noexcept {const u16 t = abs(); PC = rb(t); poll_int(); PC |= rb((t & 0xFF00) | ((t + 1) & 0xFF)) << 8;}
+        void jmp_abs() noexcept {const u16 t = rb(PC++); PC &= 0xFFFF; poll_int(); PC = t | rb(PC) << 8;}
 
         void jsr() noexcept
         {
@@ -215,6 +244,7 @@ namespace nes::emulator
             sync_hardware();
             push(PC >>  8);
             push(PC & 255);
+            poll_int();
             PC = t | rb(PC) << 8;
         }
 
@@ -232,12 +262,25 @@ namespace nes::emulator
             {
                 push(PC >>  8);
                 push(PC & 255);
-                     if constexpr (type == BRK               ) push(P | 0x30);
-                else if constexpr (type == IRQ || type == NMI) push(P | 0x20);
             }
-            static constexpr u16 vectors[]{0xFFFA, 0xFFFC, 0xFFFE, 0xFFFE};
-            PC  = rb(vectors[type]    );     P |= MI;
-            PC |= rb(vectors[type] + 1) << 8;
+            static constexpr u16 vectors[]{NuLL, 0xFFFA, 0xFFFC, 0xFFFE, 0xFFFE};
+            u16 address;
+
+            if constexpr (type == NMI) address = vectors[ NMI];
+            else 
+            {
+                if (nmi) {address = vectors[ NMI]; nmi = false;}
+                else      address = vectors[type];
+            }
+
+                 if constexpr (type == BRK               ) push(P | 0x30);
+            else if constexpr (type == IRQ || type == NMI) push(P | 0x20);
+
+            PC  = rb(address    )     ;
+            PC |= rb(address + 1) << 8;
+
+            P |= MI;
+            pending_interrupt = NuLL;
         }
 
         void oam_dma(u8 value) noexcept;
@@ -245,6 +288,7 @@ namespace nes::emulator
     public:
         void set_mem_pointers(const MemPointers& mem_pointers) noexcept {this->mem_pointers = mem_pointers;}
         void set_nmi(bool nmi) noexcept {this->nmi = nmi;}
+        void set_irq(bool irq) noexcept {this->irq = irq;}
         void instruction() noexcept;
     };
 }

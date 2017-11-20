@@ -6,17 +6,19 @@
 namespace nes::emulator
 {
     class Cartridge;
+    class CPU;
 
     class PPU final
     {
     public:
         struct MemPointers
         {
-            unsigned char* internal_ram;
             Cartridge*     cartridge;
+            CPU*           cpu;
         };
 
     private:
+        static unsigned rev_bute(unsigned byte) noexcept;
         enum CtrlMasks : u8 {
             CTRL_MASK_BASE_NAMETABLE_ADDRESS            = 0b00000011, // 0 - $2000; 1 - $2400; 2 - $2800; 3 - $2C00
             CTRL_MASK_VRAM_ADDRESS_INCREMENT            = 0b00000100, // 0 - 1; 1 - 32
@@ -41,14 +43,19 @@ namespace nes::emulator
 
         static constexpr u8 MASK_MASK_RENDERING_ENABLED = MASK_MASK_SHOW_BACKGROUND | MASK_MASK_SHOW_SPRITES;
 
-        unsigned char latch_sprite_x[8], latch_sprite_attr[8], latch_sprite_id, latch_sprite_y;
         unsigned char ctrl = 0, mask = 0, stat = 0, data_buff, open_bus_data;
-        unsigned char ram[0x0800], palette[0x20], oam[256], scan_oam[32], oam_data;
+        unsigned char ram[0x0800], palette[0x20], oam[256], scan_oam[32], oam_tmp;
+
+        struct
+        {
+            unsigned char id, y, x[8], attr[8], pat_l[8], pat_h[8];
+            bool in_range;
+        } sprite;
 
         unsigned framebuffer[240 * 256];
 
         u8 xfine, nt, at, bg_lo, bg_hi, at_latch_hi, at_latch_lo;
-        u8 oam_addr, scan_oam_addr, oam_copy = 0;
+        u8 oam_addr = 0, scan_oam_addr, oam_copy;
 
         u16 bg_shift_lo, bg_shift_hi, at_shift_lo, at_shift_hi, open_bus_addr;
         u16 clks = 0, scanline = 261, vaddr = 0, tmp_vaddr, open_bus_decay_timer = 0;
@@ -60,6 +67,8 @@ namespace nes::emulator
 
         void memory_write(u16 address, u8 value) noexcept;
         u8 memory_read(u16 address) const noexcept;
+
+        void set_cpu_nmi(bool nmi) noexcept;
 
         void reload_shift_regs() noexcept
         {
@@ -79,8 +88,7 @@ namespace nes::emulator
 
         void v_scroll() noexcept
         {
-            if ((vaddr  & 0x7000) != 0x7000)
-                 vaddr += 0x1000;
+            if ((vaddr & 0x7000) != 0x7000) vaddr += 0x1000;
             else
             {
                 auto y = vaddr >> 5 & 31;
@@ -99,20 +107,33 @@ namespace nes::emulator
         void v_update() noexcept {vaddr &= ~0x7BE0; vaddr |= tmp_vaddr & 0x7BE0;}
         void h_update() noexcept {vaddr &= ~0x041F; vaddr |= tmp_vaddr & 0x041F;}
 
-        bool pattern_table_address() const noexcept {return ctrl & CTRL_MASK_BACKGROUND_PATTERN_TABLE_ADDRESS;}
+        bool background_pattern_table_address() const noexcept {return ctrl & CTRL_MASK_BACKGROUND_PATTERN_TABLE_ADDRESS;}
+        bool sprite_pattern_table_address() const noexcept {return ctrl & CTRL_MASK_SPRITE_PATTERN_TABLE_ADDRESS;}
 
         u16 addr_nt() const noexcept {return 0x2000 | (vaddr & 0x0FFF);}
         u16 addr_at() const noexcept {return 0x23C0 | (vaddr & 0x0C00) | (vaddr >> 4 & 0x38) | (vaddr >> 2 & 0x07);}
-        u16 addr_bg() const noexcept {return 0x1000 * pattern_table_address() + 16 * nt + (vaddr >> 12);}
+        u16 addr_bg() const noexcept {return 0x1000 * background_pattern_table_address() + 16 * nt + (vaddr >> 12);}
 
         void open_bus_write_ctrl() noexcept
         {
-            tmp_vaddr &=                   0b111001111111111;
-            tmp_vaddr |=  (open_bus_data & 0b000000000000011) << 10;
+                 if (~open_bus_data & 0x80) set_cpu_nmi(false);
+            else if (    !(scanline == 261 && clks == 1))
+            {
+                if (~ctrl & stat & 0x80) set_cpu_nmi(true);
+            }
+            tmp_vaddr = (tmp_vaddr & 0x73FF) | ((open_bus_data & 0x03) << 10);
             ctrl = open_bus_data;
         }
 
-        void open_bus_write_mask() noexcept {mask = open_bus_data;}
+        void open_bus_write_mask() noexcept
+        {
+            if ((mask ^ open_bus_data) & MASK_MASK_RENDERING_ENABLED)
+            {
+                if (scanline == 261 && clks == 339 && odd_frame_post)
+                    clks = open_bus_data & MASK_MASK_RENDERING_ENABLED ? 338 : 340;
+            }
+            mask = open_bus_data;
+        }
 
         void open_bus_write_oam_addr() noexcept {    oam_addr    = open_bus_data;                 }
         void open_bus_write_oam_data() noexcept {oam[oam_addr++] = open_bus_data; oam_addr &= 255;}
@@ -120,16 +141,11 @@ namespace nes::emulator
         void open_bus_write_scroll() noexcept
         {
             if (write_toggle)
-            {
-                tmp_vaddr &=                  0b000110000011111;
-                tmp_vaddr |= (open_bus_data & 0b000000000000111) << 12;
-                tmp_vaddr |= (open_bus_data & 0b000000011111000) <<  2;
-            }
+                tmp_vaddr = (tmp_vaddr & 0x0C1F) | ((open_bus_data & 0xF8) << 2) | ((open_bus_data & 7) << 12);
             else
             {
-                tmp_vaddr &=                  0b111111111100000;
-                tmp_vaddr |= (open_bus_data & 0b000000011111000) >> 3;
-                xfine      =  open_bus_data & 0xb00000111;
+                tmp_vaddr = (tmp_vaddr & 0x7FE0) | ((open_bus_data & 0xF8) >> 3);
+                xfine = open_bus_data & 7;
             }
             write_toggle = !write_toggle;
         }
@@ -138,14 +154,12 @@ namespace nes::emulator
         {
             if (write_toggle)
             {
-                tmp_vaddr &=                 0b111111100000000;
-                tmp_vaddr |= open_bus_data & 0b000000011111111;
-                vaddr = tmp_vaddr;
+                tmp_vaddr = (tmp_vaddr & 0x7F00) | open_bus_data;
+                    vaddr =  tmp_vaddr;
             }
-            else
+            else 
             {
-                tmp_vaddr &=                  0b000000011111111;
-                tmp_vaddr |= (open_bus_data & 0b000000000111111) << 8;
+                tmp_vaddr = (tmp_vaddr & 0x00FF) | ((open_bus_data & 0x3F) << 8);
             }
             write_toggle = !write_toggle;
         }
@@ -159,7 +173,15 @@ namespace nes::emulator
 
         void open_bus_read_status() noexcept
         {
-            const u8 temp = stat; stat = write_toggle = 0;
+            if (scanline == 241)
+            {
+                switch (clks)
+                {
+                    case 1:               stat &= 127;
+                    case 2:case 3: set_cpu_nmi(false); break;
+                }
+            }
+            const u8 temp = stat; stat &= 127; write_toggle = 0;
             open_bus_data &= 31; open_bus_data |= temp & ~31;
         }
 
@@ -172,7 +194,7 @@ namespace nes::emulator
             vaddr &= 0x7FFF;
         }
 
-        void open_bus_read_oam_data() noexcept {open_bus_refresh<255>(oam[oam_addr]);}
+        void open_bus_read_oam_data() noexcept {open_bus_refresh<255>(oam[oam_addr] & 0xE3);}
 
         template<u8 mask>
         void open_bus_refresh(u8 value) noexcept
@@ -181,40 +203,72 @@ namespace nes::emulator
             open_bus_data &= ~mask; open_bus_data |= value & mask;
         }
 
-        void increment_oam_addrs() noexcept
+        template<bool high>
+        void fetch_sprite_pattern(int spr_index) noexcept
         {
-            ++     oam_addr;      oam_addr &= 0xFF;
-            ++scan_oam_addr; scan_oam_addr &= 0x1F;
-
-            if (!     oam_addr)      oam_addr_overflow = true;
-            if (!scan_oam_addr) scan_oam_addr_overflow = sprite_overflow_detection = true;
-        }
-
-        void next_cycle() noexcept
-        {
-            if (++clks == 341)
+            unsigned char* pat;
+            if constexpr (high) pat = sprite.pat_h + spr_index;
+            else                pat = sprite.pat_l + spr_index;
+            if (!sprite.in_range) *pat = 0;
+            else
             {
-                clks = (scanline == 261 && odd_frame_post) ? 1 : 0;
-                if   (++scanline == 262) {scanline = 0; odd_frame_post = !odd_frame_post;}
+                *pat = memory_read(open_bus_addr);
+                if (sprite.attr[spr_index] & 0x40) *pat = rev_bute(*pat);
             }
         }
 
-        void sprite_evaluation() noexcept;
-        void sprite_fetches() noexcept;
-        void sprite_processing() noexcept;
+        template<bool high>
+        bool sprite_tile_address(unsigned attr) noexcept
+        {
+            const unsigned diff        =        scanline - sprite.y; 
+            const unsigned diff_y_flip = attr & 0x80 ? ~diff : diff;
 
-        void background_fetches() noexcept;
-        void scroll_evaluation() noexcept;
-        void background_processing() noexcept;
+            if (ctrl & CTRL_MASK_SPRITE_SIZE)
+            {
+                open_bus_addr = 0x1000 * (sprite.id & 1) + 16 * (sprite.id & 0xFE) + ((diff_y_flip & 8) << 1) +
+                                                                         8 * high  +  (diff_y_flip & 7);
+                return diff < 16;
+            }
+            else
+            {
+                open_bus_addr = 0x1000 * sprite_pattern_table_address() + 16 * sprite.id + 8 * high + (diff_y_flip & 7);
+                return diff < 8;
+            }
+        }
+
+        unsigned sprite_pixel(unsigned &spr_pal, bool &spr_behind_bg, bool &spr_is_s0)
+        {
+            const unsigned x = clks - 2;
+            if (!(mask & MASK_MASK_SHOW_SPRITES) || (!(mask & MASK_MASK_SHOW_SPRITES_LEFTMOST_8_PIXELS) && x < 8))
+                return 0;
+            for (int i = 0; i < 8; ++i)
+            {
+                const unsigned offset = x - sprite.x[i];
+                if (offset < 8)
+                {
+                    const unsigned pat_res = ((sprite.pat_h[i] >> (7 - offset) & 1) << 1) |
+                                              (sprite.pat_l[i] >> (7 - offset) & 1);
+                    if (pat_res)
+                    {
+                        spr_pal       = sprite.attr[i] & 0x03;
+                        spr_behind_bg = sprite.attr[i] & 0x20;
+                        spr_is_s0     =            !i;
+                        return pat_res;
+                    }
+                }
+            }
+            return 0;
+        }
+
+        void sprite_operations() noexcept;
+        void sprite_evaluation() noexcept;
+        void sprite_loading() noexcept;
+
+        void background_misc() noexcept;
 
         void render_pixel() noexcept;
 
     public:
-        PPU() noexcept
-        {
-            for (int i = 0; i < 0x800; ++i) ram[i] = (i & 4) ? 255 : 0;
-        }
-
         template<unsigned reg>
         void reg_write(u8 value) noexcept
         {
@@ -239,9 +293,7 @@ namespace nes::emulator
         }
 
         void set_mem_pointers(const MemPointers& mem_pointers) noexcept {this->mem_pointers = mem_pointers;}
-        bool nmi() const noexcept {return (stat & 0x80) && (ctrl & CTRL_MASK_GENERATE_NMI);}
         bool odd_frame() noexcept {return odd_frame_post;}
-        bool rendering_enabled() const noexcept {return mask & MASK_MASK_RENDERING_ENABLED;}
         bool new_frame() noexcept
         {
             const bool temp = new_frame_post; new_frame_post = false;
