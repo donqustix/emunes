@@ -68,7 +68,6 @@ namespace nes::emulator
 
         bool write_toggle = false, odd_frame_post = false, new_frame_post = false;
         bool oam_addr_overflow, scan_oam_addr_overflow, sprite_overflow_detection;
-        bool spr_s0_curr_scanline, spr_s0_next_scanline;
 
         MemPointers mem_pointers;
 

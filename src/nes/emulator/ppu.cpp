@@ -111,7 +111,7 @@ void PPU::sprite_operations() noexcept
             default:
                      if (clks <  65) scan_oam[(clks - 1) / 2] = 255;
                 else if (clks < 257)  sprite_evaluation();
-                else if (clks < 321) {sprite_loading(); oam_addr = 0; spr_s0_curr_scanline = spr_s0_next_scanline;}
+                else if (clks < 321) {sprite_loading(); oam_addr = 0;}
             break;
         }
     }
@@ -125,8 +125,6 @@ void PPU::sprite_evaluation() noexcept
         case 0:
         {
             const bool in_range = scanline - oam_tmp < (ctrl & CTRL_MASK_SPRITE_SIZE ? 16 : 8);
-            if (clks == 66)
-                spr_s0_next_scanline = in_range;
             if (!scan_oam_addr_overflow && !oam_addr_overflow)
                 scan_oam[scan_oam_addr] = oam_tmp;
             else 
@@ -191,8 +189,8 @@ void PPU::background_misc() noexcept
         case 338: nt = memory_read(open_bus_addr);                                  break;
         case 340: nt = memory_read(open_bus_addr); if (scanline == 261 && odd_frame_post) ++clks;   break;
         default:
-            if (scanline  == 261 && clks >= 280 && clks <= 304) v_update(); else
-            if (clks <= 255 || clks >= 322)
+            if (scanline  == 261 && clks >= 280 && clks <= 304) v_update();
+            else if (clks <= 255 || clks >= 322)
             {
                 shift_shifters();
                 switch (clks % 8)
