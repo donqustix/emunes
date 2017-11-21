@@ -8,14 +8,11 @@ using namespace nes::emulator;
 
 int main()
 {
-    auto cartridge{nes::emulator::Cartridge::load("res/roms/Donkey Kong.nes")};
+    auto cartridge{nes::emulator::Cartridge::load("res/roms/Super Mario Bros (E).nes")};
     nes::emulator::CPU cpu;
     nes::emulator::PPU ppu;
-    unsigned char internal_ram[0x0800];
-    for (int i = 0; i < 0x800; ++i) internal_ram[i] = (i & 4) ? 255 : 0;
 
     nes::emulator::CPU::MemPointers mem_pointers;
-    mem_pointers.internal_ram   = internal_ram;
     mem_pointers.ppu            = &ppu;
     mem_pointers.cartridge      = &cartridge;
     cpu.set_mem_pointers(mem_pointers);

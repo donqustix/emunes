@@ -30,7 +30,7 @@ namespace nes::emulator
             CTRL_MASK_GENERATE_NMI                      = 0b10000000  // 0 - off; 1 - on
         };
 
-        enum MaskMasks : u8{
+        enum MaskMasks : u8 {
             MASK_MASK_GREYSCALE                         = 0b00000001, // 0 - normal color; 1 - produce a greyscale display
             MASK_MASK_SHOW_BACKGROUND_LEFTMOST_8_PIXELS = 0b00000010, // 0 - hide
             MASK_MASK_SHOW_SPRITES_LEFTMOST_8_PIXELS    = 0b00000100, // 0 - hide
@@ -39,6 +39,12 @@ namespace nes::emulator
             MASK_MASK_EMPHASIZE_RED                     = 0b00100000,
             MASK_MASK_EMPHASIZE_GREEN                   = 0b01000000,
             MASK_MASK_EMPHASIZE_BLUE                    = 0b10000000
+        };
+
+        enum StatMasks : u8 {
+            MASK_STAT_VBLANK          = 0b10000000,
+            MASK_STAT_SPRITE_OVERFLOW = 0b00100000,
+            MASK_STAT_SPRITE_ZERO_HIT = 0b01000000
         };
 
         static constexpr u8 MASK_MASK_RENDERING_ENABLED = MASK_MASK_SHOW_BACKGROUND | MASK_MASK_SHOW_SPRITES;
@@ -62,6 +68,7 @@ namespace nes::emulator
 
         bool write_toggle = false, odd_frame_post = false, new_frame_post = false;
         bool oam_addr_overflow, scan_oam_addr_overflow, sprite_overflow_detection;
+        bool spr_s0_curr_scanline, spr_s0_next_scanline;
 
         MemPointers mem_pointers;
 
@@ -114,12 +121,26 @@ namespace nes::emulator
         u16 addr_at() const noexcept {return 0x23C0 | (vaddr & 0x0C00) | (vaddr >> 4 & 0x38) | (vaddr >> 2 & 0x07);}
         u16 addr_bg() const noexcept {return 0x1000 * background_pattern_table_address() + 16 * nt + (vaddr >> 12);}
 
+        void access_data_increment() noexcept
+        {
+            if (!(mask & MASK_MASK_RENDERING_ENABLED) || (scanline >= 240 && scanline != 261))
+            {
+                vaddr += ctrl & CTRL_MASK_VRAM_ADDRESS_INCREMENT ? 32 : 1;
+                vaddr &= 0x7FFF;
+            }
+            else
+            {
+                h_scroll();
+                v_scroll();
+            }
+        }
+
         void open_bus_write_ctrl() noexcept
         {
-                 if (~open_bus_data & 0x80) set_cpu_nmi(false);
+                 if (~open_bus_data & CTRL_MASK_GENERATE_NMI) set_cpu_nmi(0);
             else if (    !(scanline == 261 && clks == 1))
             {
-                if (~ctrl & stat & 0x80) set_cpu_nmi(true);
+                 if (~ctrl   & stat & CTRL_MASK_GENERATE_NMI) set_cpu_nmi(1);
             }
             tmp_vaddr = (tmp_vaddr & 0x73FF) | ((open_bus_data & 0x03) << 10);
             ctrl = open_bus_data;
@@ -135,8 +156,14 @@ namespace nes::emulator
             mask = open_bus_data;
         }
 
-        void open_bus_write_oam_addr() noexcept {    oam_addr    = open_bus_data;                 }
-        void open_bus_write_oam_data() noexcept {oam[oam_addr++] = open_bus_data; oam_addr &= 255;}
+        void open_bus_write_oam_addr() noexcept {   oam_addr     = open_bus_data;}
+        void open_bus_write_oam_data() noexcept
+        {
+            if (!(mask & MASK_MASK_RENDERING_ENABLED) || (scanline >= 240 && scanline != 261))
+            {
+                oam[oam_addr++] = open_bus_data; oam_addr &= 255;
+            }
+        }
 
         void open_bus_write_scroll() noexcept
         {
@@ -167,8 +194,7 @@ namespace nes::emulator
         void open_bus_write_data() noexcept
         {
             memory_write(vaddr, open_bus_data);
-            vaddr += ctrl & CTRL_MASK_VRAM_ADDRESS_INCREMENT ? 32 : 1;
-            vaddr &= 0x7FFF;
+            access_data_increment();
         }
 
         void open_bus_read_status() noexcept
@@ -177,11 +203,13 @@ namespace nes::emulator
             {
                 switch (clks)
                 {
-                    case 1:               stat &= 127;
+                    case 1: stat &= ~MASK_STAT_VBLANK;
                     case 2:case 3: set_cpu_nmi(false); break;
                 }
             }
-            const u8 temp = stat; stat &= 127; write_toggle = 0;
+            u8 temp = stat;
+            if (clks == 1) temp &= ~MASK_STAT_SPRITE_ZERO_HIT;
+            stat &= ~MASK_STAT_VBLANK; write_toggle = 0;
             open_bus_data &= 31; open_bus_data |= temp & ~31;
         }
 
@@ -190,8 +218,7 @@ namespace nes::emulator
             u8 temp = memory_read(vaddr);
             if (vaddr < 0x3F00) {temp = data_buff; data_buff = memory_read(vaddr); open_bus_refresh<255>(temp); }
             else                {temp = data_buff            = memory_read(vaddr); open_bus_refresh< 63>(temp); }
-            vaddr += ctrl & CTRL_MASK_VRAM_ADDRESS_INCREMENT ? 32 : 1;
-            vaddr &= 0x7FFF;
+            access_data_increment();
         }
 
         void open_bus_read_oam_data() noexcept {open_bus_refresh<255>(oam[oam_addr] & 0xE3);}
@@ -220,7 +247,8 @@ namespace nes::emulator
         template<bool high>
         bool sprite_tile_address(unsigned attr) noexcept
         {
-            const unsigned diff        =        scanline - sprite.y; 
+            if (scanline == 239) return false;
+            const unsigned diff        =        scanline - sprite.y;
             const unsigned diff_y_flip = attr & 0x80 ? ~diff : diff;
 
             if (ctrl & CTRL_MASK_SPRITE_SIZE)
@@ -238,7 +266,7 @@ namespace nes::emulator
 
         unsigned sprite_pixel(unsigned &spr_pal, bool &spr_behind_bg, bool &spr_is_s0)
         {
-            const unsigned x = clks - 2;
+            const unsigned x = clks - 1;
             if (!(mask & MASK_MASK_SHOW_SPRITES) || (!(mask & MASK_MASK_SHOW_SPRITES_LEFTMOST_8_PIXELS) && x < 8))
                 return 0;
             for (int i = 0; i < 8; ++i)

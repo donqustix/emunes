@@ -8,6 +8,7 @@ namespace nes::emulator
     class Cartridge;
     class PPU;
     class CPU;
+    class Controller;
 
     namespace third_party::APU_bisqwit
     {
@@ -25,7 +26,7 @@ namespace nes::emulator
     public:
         struct MemPointers
         {
-            unsigned char*  internal_ram;
+            Controller*     controller;
             PPU*            ppu;
             Cartridge*      cartridge;
         };
@@ -43,6 +44,8 @@ namespace nes::emulator
         enum FlagShifts : u8 {SC = 0, SZ, SI, SD, SB, SV = SB + 2, SN};
 
         MemPointers mem_pointers;
+
+        unsigned char internal_ram[0x800];
 
         u8   A = 0, X = 0, Y = 0, P = 0, S = 0;
         u16 PC = 0;
@@ -286,6 +289,8 @@ namespace nes::emulator
         void oam_dma(u8 value) noexcept;
 
     public:
+        CPU() noexcept {for (int i = 0; i < 0x800; ++i) internal_ram[i] = (i & 4) ? 255 : 0;}
+
         void set_mem_pointers(const MemPointers& mem_pointers) noexcept {this->mem_pointers = mem_pointers;}
         void set_nmi(bool nmi) noexcept {this->nmi = nmi;}
         void set_irq(bool irq) noexcept {this->irq = irq;}

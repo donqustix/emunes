@@ -63,7 +63,7 @@ void PPU::render_pixel() noexcept
       0xFCFCFC, 0xA4E4FC, 0xB8B8F8, 0xD8B8F8, 0xF8B8F8, 0xF8A4C0, 0xF0D0B0, 0xFCE0A8,
       0xF8D878, 0xD8F878, 0xB8F8B8, 0xB8F8D8, 0x00FCFC, 0xF8D8F8, 0x000000, 0x000000 };
 
-    const auto x = clks - 2;
+    const auto x = clks - 1;
     u16 pal;
 
     if (!(mask & MASK_MASK_RENDERING_ENABLED)) pal = (~vaddr & 0x3F00) ? 0 : vaddr & 0x1F;
@@ -80,11 +80,8 @@ void PPU::render_pixel() noexcept
         else {
             bg_pat = ((bg_shift_hi >> (15 - xfine) & 1) << 1) |
                       (bg_shift_lo >> (15 - xfine) & 1);
-
-            if (spr_pat && spr_is_s0 && bg_pat && x != 255)
-                stat |= 0x40;
+            if (spr_pat && spr_is_s0 && bg_pat && x != 255) stat |= MASK_STAT_SPRITE_ZERO_HIT;
         }
-
         if (spr_pat && !(spr_behind_bg && bg_pat)) pal = 0x10 + (spr_pal << 2) + spr_pat;
         else {
             if (!bg_pat) pal = 0;
@@ -96,7 +93,6 @@ void PPU::render_pixel() noexcept
             }
         }
     }
-
     framebuffer[scanline * 256 + x] = rgb_table[memory_read(0x3F00 + pal)];
 }
 
@@ -115,7 +111,7 @@ void PPU::sprite_operations() noexcept
             default:
                      if (clks <  65) scan_oam[(clks - 1) / 2] = 255;
                 else if (clks < 257)  sprite_evaluation();
-                else if (clks < 321) {sprite_loading(); oam_addr = 0;}
+                else if (clks < 321) {sprite_loading(); oam_addr = 0; spr_s0_curr_scanline = spr_s0_next_scanline;}
             break;
         }
     }
@@ -129,6 +125,8 @@ void PPU::sprite_evaluation() noexcept
         case 0:
         {
             const bool in_range = scanline - oam_tmp < (ctrl & CTRL_MASK_SPRITE_SIZE ? 16 : 8);
+            if (clks == 66)
+                spr_s0_next_scanline = in_range;
             if (!scan_oam_addr_overflow && !oam_addr_overflow)
                 scan_oam[scan_oam_addr] = oam_tmp;
             else 
@@ -147,7 +145,7 @@ void PPU::sprite_evaluation() noexcept
             }
             else if (sprite_overflow_detection)
             {
-                if (in_range && !oam_addr_overflow) {stat |= 0x20; sprite_overflow_detection = false;}
+                if (in_range && !oam_addr_overflow) {stat |= MASK_STAT_SPRITE_OVERFLOW; sprite_overflow_detection = false;}
                 else 
                 {
                     oam_addr = ((oam_addr + 4) & 0xFC) | ((oam_addr + 1) & 3);
@@ -193,8 +191,8 @@ void PPU::background_misc() noexcept
         case 338: nt = memory_read(open_bus_addr);                                  break;
         case 340: nt = memory_read(open_bus_addr); if (scanline == 261 && odd_frame_post) ++clks;   break;
         default:
-            if (scanline  == 261 && clks >= 280 && clks <= 304) v_update();
-            else if (clks <= 255 || clks >= 322)
+            if (scanline  == 261 && clks >= 280 && clks <= 304) v_update(); else
+            if (clks <= 255 || clks >= 322)
             {
                 shift_shifters();
                 switch (clks % 8)
@@ -216,17 +214,15 @@ void PPU::background_misc() noexcept
 
 void PPU::tick() noexcept
 {
-    if (scanline < 240 && clks >= 2 && clks <= 257)
-        render_pixel();
-    if (!--open_bus_decay_timer) open_bus_data = 0;
+    if (open_bus_decay_timer > 0) {--open_bus_decay_timer; open_bus_data = 0;}
     switch (scanline)
     {
-        case 241: if (clks == 0) {stat |= 0x80; if (ctrl & 0x80) set_cpu_nmi(true);} break;
+        case 241: if (clks == 0) {stat |= MASK_STAT_VBLANK; if (ctrl & CTRL_MASK_GENERATE_NMI) set_cpu_nmi(true);} break;
         case 261:
             switch (clks)
             {
-                case 0: stat &= ~0x20; break;
-                case 1: stat &= ~0xC0; break;
+                case 0: stat &= ~(MASK_STAT_SPRITE_OVERFLOW | MASK_STAT_SPRITE_ZERO_HIT); break;
+                case 1: stat &= ~ MASK_STAT_VBLANK;                                       break;
             }
         break;
         case 240: if (clks == 0) new_frame_post = true; break;
@@ -236,6 +232,8 @@ void PPU::tick() noexcept
         sprite_operations();
         background_misc();
     }
+    if (scanline < 240 && clks >= 1 && clks <= 256)
+        render_pixel();
     if (++clks > 340)
     {
         if (++scanline == 262) {scanline = 0; odd_frame_post = !odd_frame_post;}

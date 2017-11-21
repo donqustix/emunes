@@ -16,8 +16,8 @@ void CPU::sync_hardware() noexcept
 void CPU::wb(u16 address, u8 value) noexcept
 {
     sync_hardware();
-    if      (address < 0x0800) mem_pointers.internal_ram[address] = value; // 2KB internal RAM
-    else if (address < 0x2000) mem_pointers.internal_ram[address - 0x0800] = value; // mirrors of $0000 - $800
+    if      (address < 0x0800) internal_ram[address] = value; // 2KB internal RAM
+    else if (address < 0x2000) internal_ram[address - 0x0800] = value; // mirrors of $0000 - $800
     else if (address < 0x4000)
     {
         // $2000 - $2008 - ppu registers
@@ -54,8 +54,8 @@ void CPU::wb(u16 address, u8 value) noexcept
 u8 CPU::rb(u16 address) noexcept
 {
     sync_hardware();
-    if      (address < 0x0800) return mem_pointers.internal_ram[address]; // 2KB internal RAM
-    else if (address < 0x2000) return mem_pointers.internal_ram[address - 0x0800]; // mirror of $0-$800
+    if      (address < 0x0800) return internal_ram[address]; // 2KB internal RAM
+    else if (address < 0x2000) return internal_ram[address - 0x0800]; // mirror of $0-$800
     else if (address < 0x4000)
         // $2000 - $2008 - ppu registers
         // $2008 - $4000 - mirrors of $2000-$2007 (repeats every 8 bytes)
@@ -77,7 +77,7 @@ u8 CPU::rb(u16 address) noexcept
     else if (address < 0x4020) return 0; // normally disabled
     else if (address < 0x8000) return 0;
     else if (address < 0xC000) return mem_pointers.cartridge->read_rom(address - 0x8000);
-    else return mem_pointers.cartridge->read_rom(address - 0xC000); // cartridge space
+    else return mem_pointers.cartridge->read_rom(address - 0x8000); // cartridge space
 
     return 0;
 }
