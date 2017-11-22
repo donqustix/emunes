@@ -6,6 +6,7 @@
 #include <SDL2/SDL.h>
 
 #include <iostream>
+#include <fstream>
 
 using namespace nes::emulator;
 
@@ -33,13 +34,13 @@ namespace nes::emulator
         ppu.set_pixel_output(framebuffer);
 
         ::SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER);
-        SDL_Window* const window = ::SDL_CreateWindow("emunes", 0, 0, 1366, 768, SDL_WINDOW_RESIZABLE);
+        SDL_Window* const window = ::SDL_CreateWindow("emunes", 0, 0, 256, 240, SDL_WINDOW_RESIZABLE);
         SDL_Renderer* const renderer = ::SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
         SDL_Texture* const texture = ::SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
                 SDL_TEXTUREACCESS_STREAMING, 256, 240);
 
-        ::SDL_RenderSetLogicalSize(renderer, 256, 240);
-        ::SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
+        //::SDL_RenderSetLogicalSize(renderer, 256, 240);
+        //::SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
 
         constexpr unsigned secs_per_update = 1000 / 60, instrs_per_update = 11000;
         unsigned acc_update_time = 0;
@@ -57,7 +58,12 @@ namespace nes::emulator
             ::SDL_PumpEvents();
 
             const Uint8* const keyboard_state = ::SDL_GetKeyboardState(nullptr);
+
+            static bool triggered = false, latch = false;
+
             if (keyboard_state[SDL_SCANCODE_ESCAPE]) running = false;
+            if (keyboard_state[SDL_SCANCODE_P]) triggered = true;
+            else if (triggered) {triggered = false; latch = true;}
 
             controller.set_port_keys<0>(keyboard_state[SDL_SCANCODE_SPACE   ] << 0 |
                                         keyboard_state[SDL_SCANCODE_F       ] << 1 |
@@ -72,6 +78,21 @@ namespace nes::emulator
 
             if (ppu.new_frame())
             {
+                if (latch)
+                {
+                    static unsigned i = 0;
+                    std::ofstream stream{"res/images/screenshot" + std::to_string(i++) + ".ppm", std::ios::out | std::ios::binary};
+                    stream << "P6\n" << 256 << ' ' << 240 << '\n' << 255 << '\n';
+                    for (int i = 0; i < 256 * 240; ++i)
+                    {
+                        const unsigned char r = framebuffer[i] >>  0 & 255;
+                        const unsigned char g = framebuffer[i] >>  8 & 255;
+                        const unsigned char b = framebuffer[i] >> 16 & 255;
+                        stream.put(r);stream.put(g);stream.put(b);
+                    }
+                    latch = false;
+                }
+
                 Uint32* pixels;
                 int pitch;
 
