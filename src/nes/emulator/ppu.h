@@ -43,8 +43,8 @@ namespace nes::emulator
 
         enum StatMasks : u8 {
             MASK_STAT_VBLANK          = 0b10000000,
-            MASK_STAT_SPRITE_OVERFLOW = 0b00100000,
-            MASK_STAT_SPRITE_ZERO_HIT = 0b01000000
+            MASK_STAT_SPRITE_ZERO_HIT = 0b01000000,
+            MASK_STAT_SPRITE_OVERFLOW = 0b00100000
         };
 
         static constexpr u8 MASK_MASK_RENDERING_ENABLED = MASK_MASK_SHOW_BACKGROUND | MASK_MASK_SHOW_SPRITES;
@@ -58,7 +58,7 @@ namespace nes::emulator
             bool in_range;
         } sprite;
 
-        unsigned framebuffer[240 * 256];
+        px32* pixel_output = nullptr;
 
         u8 xfine, nt, at, bg_lo, bg_hi, at_latch_hi, at_latch_lo;
         u8 oam_addr = 0, scan_oam_addr, oam_copy;
@@ -68,6 +68,7 @@ namespace nes::emulator
 
         bool write_toggle = false, odd_frame_post = false, new_frame_post = false;
         bool oam_addr_overflow, scan_oam_addr_overflow, sprite_overflow_detection;
+        bool s0_next_scanline, s0_curr_scanline;
 
         MemPointers mem_pointers;
 
@@ -206,9 +207,7 @@ namespace nes::emulator
                     case 2:case 3: set_cpu_nmi(false); break;
                 }
             }
-            u8 temp = stat;
-            if (clks == 1) temp &= ~MASK_STAT_SPRITE_ZERO_HIT;
-            stat &= ~MASK_STAT_VBLANK; write_toggle = 0;
+            u8 temp = stat; stat &= ~MASK_STAT_VBLANK; write_toggle = 0;
             open_bus_data &= 31; open_bus_data |= temp & ~31;
         }
 
@@ -246,7 +245,6 @@ namespace nes::emulator
         template<bool high>
         bool sprite_tile_address(unsigned attr) noexcept
         {
-            if (scanline == 239) return false;
             const unsigned diff        =        scanline - sprite.y;
             const unsigned diff_y_flip = attr & 0x80 ? ~diff : diff;
 
@@ -266,7 +264,7 @@ namespace nes::emulator
         unsigned sprite_pixel(unsigned &spr_pal, bool &spr_behind_bg, bool &spr_is_s0)
         {
             const unsigned x = clks - 1;
-            if (!(mask & MASK_MASK_SHOW_SPRITES) || (!(mask & MASK_MASK_SHOW_SPRITES_LEFTMOST_8_PIXELS) && x < 8))
+            if (!(mask & MASK_MASK_SHOW_SPRITES) || (!(mask & MASK_MASK_SHOW_SPRITES_LEFTMOST_8_PIXELS) && x < 8) || x == 255)
                 return 0;
             for (int i = 0; i < 8; ++i)
             {
@@ -279,7 +277,7 @@ namespace nes::emulator
                     {
                         spr_pal       = sprite.attr[i] & 0x03;
                         spr_behind_bg = sprite.attr[i] & 0x20;
-                        spr_is_s0     =            !i;
+                        spr_is_s0     =            !i && s0_curr_scanline;
                         return pat_res;
                     }
                 }
@@ -320,6 +318,7 @@ namespace nes::emulator
         }
 
         void set_mem_pointers(const MemPointers& mem_pointers) noexcept {this->mem_pointers = mem_pointers;}
+        void set_pixel_output(px32* pixel_output) noexcept {this->pixel_output = pixel_output;}
         bool odd_frame() noexcept {return odd_frame_post;}
         bool new_frame() noexcept
         {
@@ -329,7 +328,7 @@ namespace nes::emulator
 
         void tick() noexcept;
 
-        const unsigned* get_framebuffer() const noexcept {return framebuffer;}
+        //const unsigned* get_framebuffer() const noexcept {return framebuffer;}
     };
 }
 

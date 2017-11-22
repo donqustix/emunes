@@ -29,8 +29,8 @@ unsigned PPU::rev_bute(unsigned n) noexcept
 
 void PPU::memory_write(u16 address, u8 value) noexcept
 {
-    if      (address < 0x2000) mem_pointers.cartridge->write_video_memory(address, value);
-    else if (address < 0x3F00) ram[address % 0x800] = value;
+    if      (address < 0x2000)     mem_pointers.cartridge->write_video_memory(address, value);
+    else if (address < 0x3F00) ram[mem_pointers.cartridge->mirror_address(address - 0x2000)]  = value;
     else if (address < 0x4000)
     {
         if ((address & 0x13) == 0x10) address &= ~0x10;
@@ -40,8 +40,8 @@ void PPU::memory_write(u16 address, u8 value) noexcept
 
 u8 PPU::memory_read(u16 address) const noexcept
 {
-    if      (address < 0x2000) return mem_pointers.cartridge->read_video_memory(address);
-    else if (address < 0x3F00) return ram[address % 0x800];
+    if      (address < 0x2000) return     mem_pointers.cartridge->read_video_memory(address);
+    else if (address < 0x3F00) return ram[mem_pointers.cartridge->mirror_address(address - 0x2000)];
     else
     {
         if ((address & 0x13) == 0x10) address &= ~0x10;
@@ -53,7 +53,7 @@ void PPU::set_cpu_nmi(bool nmi) noexcept {mem_pointers.cpu->set_nmi(nmi);}
 
 void PPU::render_pixel() noexcept
 {
-    static constexpr unsigned rgb_table[] =
+    static constexpr px32 rgb_table[] =
     { 0x7C7C7C, 0x0000FC, 0x0000BC, 0x4428BC, 0x940084, 0xA80020, 0xA81000, 0x881400,
       0x503000, 0x007800, 0x006800, 0x005800, 0x004058, 0x000000, 0x000000, 0x000000,
       0xBCBCBC, 0x0078F8, 0x0058F8, 0x6844FC, 0xD800CC, 0xE40058, 0xF83800, 0xE45C10,
@@ -80,7 +80,7 @@ void PPU::render_pixel() noexcept
         else {
             bg_pat = ((bg_shift_hi >> (15 - xfine) & 1) << 1) |
                       (bg_shift_lo >> (15 - xfine) & 1);
-            if (spr_pat && spr_is_s0 && bg_pat && x != 255) stat |= MASK_STAT_SPRITE_ZERO_HIT;
+            if (spr_pat && spr_is_s0 && bg_pat) stat |= MASK_STAT_SPRITE_ZERO_HIT;
         }
         if (spr_pat && !(spr_behind_bg && bg_pat)) pal = 0x10 + (spr_pal << 2) + spr_pat;
         else {
@@ -93,7 +93,7 @@ void PPU::render_pixel() noexcept
             }
         }
     }
-    framebuffer[scanline * 256 + x] = rgb_table[memory_read(0x3F00 + pal)];
+    pixel_output[scanline * 256 + x] = rgb_table[memory_read(0x3F00 + pal)];
 }
 
 void PPU::sprite_operations() noexcept
@@ -111,7 +111,7 @@ void PPU::sprite_operations() noexcept
             default:
                      if (clks <  65) scan_oam[(clks - 1) / 2] = 255;
                 else if (clks < 257)  sprite_evaluation();
-                else if (clks < 321) {sprite_loading(); oam_addr = 0;}
+                else if (clks < 321) {sprite_loading(); s0_curr_scanline = s0_next_scanline; oam_addr = 0;}
             break;
         }
     }
@@ -124,7 +124,8 @@ void PPU::sprite_evaluation() noexcept
         case 1: oam_tmp = oam[oam_addr]; break;
         case 0:
         {
-            const bool in_range = scanline - oam_tmp < (ctrl & CTRL_MASK_SPRITE_SIZE ? 16 : 8);
+            const bool in_range = (scanline - oam_tmp < (ctrl & CTRL_MASK_SPRITE_SIZE ? 16 : 8)) && scanline != 239;
+            if (clks == 66) s0_next_scanline = in_range;
             if (!scan_oam_addr_overflow && !oam_addr_overflow)
                 scan_oam[scan_oam_addr] = oam_tmp;
             else 
@@ -220,7 +221,7 @@ void PPU::tick() noexcept
             switch (clks)
             {
                 case 0: stat &= ~(MASK_STAT_SPRITE_OVERFLOW | MASK_STAT_SPRITE_ZERO_HIT); break;
-                case 1: stat &= ~ MASK_STAT_VBLANK;                                       break;
+                case 1: stat &= ~ MASK_STAT_VBLANK; s0_next_scanline = false;             break;
             }
         break;
         case 240: if (clks == 0) new_frame_post = true; break;

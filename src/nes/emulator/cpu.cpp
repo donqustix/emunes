@@ -2,6 +2,7 @@
 
 #include "cartridge.h"
 #include "ppu.h"
+#include "controller.h"
 
 #include "third_party/apu_bisqwit.h"
 
@@ -40,7 +41,7 @@ void CPU::wb(u16 address, u8 value) noexcept
         {
             case 0x4014: oam_dma(value);                                     break;
             case 0x4015: third_party::APU_bisqwit::Write(0x15, value);       break;
-            case 0x4016:                                                     break;
+            case 0x4016: mem_pointers.controller->write(value);              break;
             case 0x4017:
             default: third_party::APU_bisqwit::Write(address & 0x1F, value); break;
         }
@@ -48,7 +49,7 @@ void CPU::wb(u16 address, u8 value) noexcept
     else if (address < 0x4020); // normally disabled
     else if (address < 0x6000); // cartridge space
     else if (address < 0x8000) mem_pointers.cartridge->write_ram(address - 0x6000, value);
-    //else mem_pointers.cartridge->write_mapper(value);
+    else mem_pointers.cartridge->write_mapper(value);
 }
 
 u8 CPU::rb(u16 address) noexcept
@@ -72,12 +73,16 @@ u8 CPU::rb(u16 address) noexcept
         }
     else if (address < 0x4018) // apu and I/O registers
     {
-        if (address == 0x4015) return third_party::APU_bisqwit::Read(*this);
+        switch (address)
+        {
+            case 0x4015: return third_party::APU_bisqwit::Read(*this);
+            case 0x4016: return mem_pointers.controller->read<0>();
+            case 0x4017: return mem_pointers.controller->read<1>();
+        }
     }
     else if (address < 0x4020) return 0; // normally disabled
     else if (address < 0x8000) return 0;
-    else if (address < 0xC000) return mem_pointers.cartridge->read_rom(address - 0x8000);
-    else return mem_pointers.cartridge->read_rom(address - 0x8000); // cartridge space
+    else return mem_pointers.cartridge->read_rom(address - 0x8000);
 
     return 0;
 }

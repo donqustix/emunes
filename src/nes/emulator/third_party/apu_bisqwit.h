@@ -4,6 +4,7 @@
 #include "nes/emulator/cpu.h"
 
 #include <cstdint>
+#include <cstdio>
 
 /* NESEMU1 : EMULATOR FOR THE NINTENDO ENTERTAINMENT SYSTEM (R) ARCHITECTURE  */
 /* Written by and copyright (C) 2011  Joel Yliluoma - http://iki.fi/bisqwit/  */
@@ -232,7 +233,7 @@ namespace nes::emulator::third_party::APU_bisqwit /* Audio Processing Unit */
         // so I simply use a combination of external programs for outputting the audio.
         // Hooray for Unix principles! A/V sync will be ensured in post-process.
         //return; // Disable sound because already device is in use
-        //static FILE* fp = popen("resample -to r48000 | aplay -fdat 2>/dev/null", "w");
+        //static FILE* fp = popen("resample -to 48000", "w");
         //fputc(sample, fp);
         //fputc(sample/256, fp);
     }
