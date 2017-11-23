@@ -245,6 +245,7 @@ namespace nes::emulator
         template<bool high>
         bool sprite_tile_address(unsigned attr) noexcept
         {
+            if (scanline == 239) return false;
             const unsigned diff        =        scanline - sprite.y;
             const unsigned diff_y_flip = attr & 0x80 ? ~diff : diff;
 
@@ -327,8 +328,6 @@ namespace nes::emulator
         }
 
         void tick() noexcept;
-
-        //const unsigned* get_framebuffer() const noexcept {return framebuffer;}
     };
 }
 

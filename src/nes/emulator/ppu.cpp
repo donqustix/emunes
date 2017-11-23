@@ -32,10 +32,7 @@ void PPU::memory_write(u16 address, u8 value) noexcept
     if      (address < 0x2000)     mem_pointers.cartridge->write_video_memory(address, value);
     else if (address < 0x3F00) ram[mem_pointers.cartridge->mirror_address(address - 0x2000)]  = value;
     else if (address < 0x4000)
-    {
-        if ((address & 0x13) == 0x10) address &= ~0x10;
-        palette[address & 0x1F] = value;
-    }
+        palette[((address & 0x13) == 0x10 ? address & ~0x10 : address) & 0x1F] = value;
 }
 
 u8 PPU::memory_read(u16 address) const noexcept
@@ -43,10 +40,7 @@ u8 PPU::memory_read(u16 address) const noexcept
     if      (address < 0x2000) return     mem_pointers.cartridge->read_video_memory(address);
     else if (address < 0x3F00) return ram[mem_pointers.cartridge->mirror_address(address - 0x2000)];
     else
-    {
-        if ((address & 0x13) == 0x10) address &= ~0x10;
-        return palette[address & 0x1F];
-    }
+        return palette[((address & 0x13) == 0x10 ? address & ~0x10 : address) & 0x1F];
 }
 
 void PPU::set_cpu_nmi(bool nmi) noexcept {mem_pointers.cpu->set_nmi(nmi);}
@@ -124,7 +118,7 @@ void PPU::sprite_evaluation() noexcept
         case 1: oam_tmp = oam[oam_addr]; break;
         case 0:
         {
-            const bool in_range = (scanline - oam_tmp < (ctrl & CTRL_MASK_SPRITE_SIZE ? 16 : 8)) && scanline != 239;
+            const bool in_range = (scanline - oam_tmp < (ctrl & CTRL_MASK_SPRITE_SIZE ? 16 : 8));
             if (clks == 66) s0_next_scanline = in_range;
             if (!scan_oam_addr_overflow && !oam_addr_overflow)
                 scan_oam[scan_oam_addr] = oam_tmp;
@@ -178,12 +172,12 @@ void PPU::sprite_loading() noexcept
 
 void PPU::background_misc() noexcept
 {
-    if (scanline >= 240 && scanline != 261) return;
     switch (clks)
     {
         case   0:                                                                   break;
         case   1: open_bus_addr = addr_nt();                                        break;
-        case 256: shift_shifters(); bg_hi = memory_read(open_bus_addr); v_scroll(); break;
+        case 254: shift_shifters(); bg_lo = memory_read(open_bus_addr); v_scroll();
+        case 256: shift_shifters(); bg_hi = memory_read(open_bus_addr);             break;
         case 257: shift_shifters(); reload_shift_regs();                h_update(); break;
         case 321: open_bus_addr = addr_nt();                                        break;
         case 339: open_bus_addr = addr_nt();                                        break;

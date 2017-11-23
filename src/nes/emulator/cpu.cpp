@@ -11,7 +11,7 @@ using namespace nes::emulator;
 void CPU::sync_hardware() noexcept
 {
     for (int i = 0; i < 3; ++i) mem_pointers.ppu->tick();
-    third_party::APU_bisqwit::tick(*this);
+ //   third_party::APU_bisqwit::tick(*this);
 }
 
 void CPU::wb(u16 address, u8 value) noexcept
@@ -40,10 +40,10 @@ void CPU::wb(u16 address, u8 value) noexcept
         switch (address)
         {
             case 0x4014: oam_dma(value);                                     break;
-            case 0x4015: third_party::APU_bisqwit::Write(0x15, value);       break;
+         //   case 0x4015: third_party::APU_bisqwit::Write(0x15, value);       break;
             case 0x4016: mem_pointers.controller->write(value);              break;
-            case 0x4017:
-            default: third_party::APU_bisqwit::Write(address & 0x1F, value); break;
+            //case 0x4017:
+           // default: third_party::APU_bisqwit::Write(address & 0x1F, value); break;
         }
     }
     else if (address < 0x4020); // normally disabled
@@ -75,7 +75,7 @@ u8 CPU::rb(u16 address) noexcept
     {
         switch (address)
         {
-            case 0x4015: return third_party::APU_bisqwit::Read(*this);
+      //      case 0x4015: return third_party::APU_bisqwit::Read(*this);
             case 0x4016: return mem_pointers.controller->read<0>();
             case 0x4017: return mem_pointers.controller->read<1>();
         }

@@ -7,6 +7,7 @@
 
 #include <iostream>
 #include <fstream>
+#include <cstdlib>
 
 using namespace nes::emulator;
 
@@ -34,13 +35,13 @@ namespace nes::emulator
         ppu.set_pixel_output(framebuffer);
 
         ::SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER);
-        SDL_Window* const window = ::SDL_CreateWindow("emunes", 0, 0, 256, 240, SDL_WINDOW_RESIZABLE);
+        SDL_Window* const window = ::SDL_CreateWindow("emunes", 0, 0, 1366, 768, SDL_WINDOW_RESIZABLE);
         SDL_Renderer* const renderer = ::SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
         SDL_Texture* const texture = ::SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
                 SDL_TEXTUREACCESS_STREAMING, 256, 240);
 
-        //::SDL_RenderSetLogicalSize(renderer, 256, 240);
-        //::SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
+        ::SDL_RenderSetLogicalSize(renderer, 256, 240);
+        ::SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
 
         constexpr unsigned secs_per_update = 1000 / 60, instrs_per_update = 11000;
         unsigned acc_update_time = 0;
@@ -65,16 +66,19 @@ namespace nes::emulator
             if (keyboard_state[SDL_SCANCODE_P]) triggered = true;
             else if (triggered) {triggered = false; latch = true;}
 
-            controller.set_port_keys<0>(keyboard_state[SDL_SCANCODE_SPACE   ] << 0 |
-                                        keyboard_state[SDL_SCANCODE_F       ] << 1 |
-                                        keyboard_state[SDL_SCANCODE_Q       ] << 2 |
-                                        keyboard_state[SDL_SCANCODE_RETURN  ] << 3 |
-                                        keyboard_state[SDL_SCANCODE_UP      ] << 4 |
-                                        keyboard_state[SDL_SCANCODE_DOWN    ] << 5 |
-                                        keyboard_state[SDL_SCANCODE_LEFT    ] << 6 |
-                                        keyboard_state[SDL_SCANCODE_RIGHT   ] << 7);
+            controller.set_port_keys<0>(keyboard_state[SDL_SCANCODE_SPACE  ] << 0 |
+                                        keyboard_state[SDL_SCANCODE_F      ] << 1 |
+                                        keyboard_state[SDL_SCANCODE_Q      ] << 2 |
+                                        keyboard_state[SDL_SCANCODE_RETURN ] << 3 |
+                                        keyboard_state[SDL_SCANCODE_W      ] << 4 |
+                                        keyboard_state[SDL_SCANCODE_S      ] << 5 |
+                                        keyboard_state[SDL_SCANCODE_A      ] << 6 |
+                                        keyboard_state[SDL_SCANCODE_D      ] << 7);
+
             for (; acc_update_time >= secs_per_update; acc_update_time -= secs_per_update)
+            {
                 for (auto i = instrs_per_update; i--;) cpu.instruction();
+            }
 
             if (ppu.new_frame())
             {
@@ -98,8 +102,23 @@ namespace nes::emulator
 
                 ::SDL_LockTexture(texture, nullptr, reinterpret_cast<void**>(&pixels), &pitch);
 
-                for (int i = 0; i < 240 * 256; ++i)
-                    pixels[i] = 0xFF000000 | framebuffer[i];
+                for (int i = 0; i < 240; ++i)
+                {
+                    for (int j = 0; j < 256; ++j)
+                    {
+                        unsigned char r = framebuffer[i * 256 + j] >> 16 & 255;
+                        unsigned char g = framebuffer[i * 256 + j] >>  8 & 255;
+                        unsigned char b = framebuffer[i * 256 + j] >>  0 & 255;
+                        if (i % 2)
+                        {
+                            static unsigned val = (r + g + b) / 5;
+                            r = r >= val ? r - std::rand() % (val + 1) : r + std::rand() % (val + 1);
+                            g = g >= val ? g - std::rand() % (val + 1) : g + std::rand() % (val + 1);
+                            b = b >= val ? b - std::rand() % (val + 1) : b + std::rand() % (val + 1);
+                        }
+                        pixels[i * 256 + j] = 0xFF000000 | (r << 16 | g << 8 | b);
+                    }
+                }
 
                 ::SDL_UnlockTexture(texture);
             }

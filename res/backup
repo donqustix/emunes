@@ -1,4 +1,7 @@
 
+         //   if (scanline < 240 && clks == 130) temp &= ~MASK_STAT_SPRITE_OVERFLOW;
+         //   if (scanline < 240 && clks == 240) temp &= ~MASK_STAT_SPRITE_OVERFLOW;
+
     /*
     const int x = clks - 2;
     if (!(mask & MASK_MASK_RENDERING_ENABLED)) {framebuffer[scanline * 256 + x] = 0xFFFFFF; return;}
