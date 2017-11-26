@@ -1,4 +1,23 @@
 
+                /*
+                for (int i = 0; i < 240; ++i)
+                {
+                    for (int j = 0; j < 256; ++j)
+                    {
+                        unsigned char r = framebuffer[i * 256 + j] >> 16 & 255;
+                        unsigned char g = framebuffer[i * 256 + j] >>  8 & 255;
+                        unsigned char b = framebuffer[i * 256 + j] >>  0 & 255;
+                        if (i % 2)
+                        {
+                            static unsigned val = (r + g + b) / 5;
+                            r = r >= val ? r - std::rand() % (val + 1) : r + std::rand() % (val + 1);
+                            g = g >= val ? g - std::rand() % (val + 1) : g + std::rand() % (val + 1);
+                            b = b >= val ? b - std::rand() % (val + 1) : b + std::rand() % (val + 1);
+                        }
+                        pixels[i * 256 + j] = 0xFF000000 | (r << 16 | g << 8 | b);
+                    }
+                }*/
+
          //   if (scanline < 240 && clks == 130) temp &= ~MASK_STAT_SPRITE_OVERFLOW;
          //   if (scanline < 240 && clks == 240) temp &= ~MASK_STAT_SPRITE_OVERFLOW;
 

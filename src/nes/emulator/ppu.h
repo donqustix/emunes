@@ -66,8 +66,10 @@ namespace nes::emulator
         u16 bg_shift_lo, bg_shift_hi, at_shift_lo, at_shift_hi, open_bus_addr;
         u16 clks = 0, scanline = 261, vaddr = 0, tmp_vaddr, open_bus_decay_timer = 0;
 
+        u8 write_addr_delay = 0;
+
         bool write_toggle = false, odd_frame_post = false, new_frame_post = false;
-        bool oam_addr_overflow, scan_oam_addr_overflow, sprite_overflow_detection;
+        bool oam_addr_overflow, scan_oam_addr_overflow, sprite_overflow_detection, sprite_overflow = false;
         bool s0_next_scanline, s0_curr_scanline;
 
         MemPointers mem_pointers;
@@ -159,10 +161,8 @@ namespace nes::emulator
         void open_bus_write_oam_addr() noexcept {   oam_addr     = open_bus_data;}
         void open_bus_write_oam_data() noexcept
         {
-            if (!(mask & MASK_MASK_RENDERING_ENABLED) || (scanline >= 240 && scanline != 261))
-            {
+            //if (!(mask & MASK_MASK_RENDERING_ENABLED) || (scanline >= 240 && scanline != 261))
                 oam[oam_addr++] = open_bus_data; oam_addr &= 255;
-            }
         }
 
         void open_bus_write_scroll() noexcept
@@ -182,7 +182,7 @@ namespace nes::emulator
             if (write_toggle)
             {
                 tmp_vaddr = (tmp_vaddr & 0x7F00) | open_bus_data;
-                    vaddr =  tmp_vaddr;
+                write_addr_delay = 2;
             }
             else 
             {
@@ -245,7 +245,6 @@ namespace nes::emulator
         template<bool high>
         bool sprite_tile_address(unsigned attr) noexcept
         {
-            if (scanline == 239) return false;
             const unsigned diff        =        scanline - sprite.y;
             const unsigned diff_y_flip = attr & 0x80 ? ~diff : diff;
 
@@ -253,19 +252,19 @@ namespace nes::emulator
             {
                 open_bus_addr = 0x1000 * (sprite.id & 1) + 16 * (sprite.id & 0xFE) + ((diff_y_flip & 8) << 1) +
                                                                          8 * high  +  (diff_y_flip & 7);
-                return diff < 16;
+                return diff < 16 && scanline != 239;
             }
             else
             {
                 open_bus_addr = 0x1000 * sprite_pattern_table_address() + 16 * sprite.id + 8 * high + (diff_y_flip & 7);
-                return diff < 8;
+                return diff  < 8 && scanline != 239;
             }
         }
 
         unsigned sprite_pixel(unsigned &spr_pal, bool &spr_behind_bg, bool &spr_is_s0)
         {
             const unsigned x = clks - 1;
-            if (!(mask & MASK_MASK_SHOW_SPRITES) || (!(mask & MASK_MASK_SHOW_SPRITES_LEFTMOST_8_PIXELS) && x < 8) || x == 255)
+            if (!(mask & MASK_MASK_SHOW_SPRITES) || (!(mask & MASK_MASK_SHOW_SPRITES_LEFTMOST_8_PIXELS) && x < 8))
                 return 0;
             for (int i = 0; i < 8; ++i)
             {

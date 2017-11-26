@@ -7,7 +7,6 @@
 
 #include <iostream>
 #include <fstream>
-#include <cstdlib>
 
 using namespace nes::emulator;
 
@@ -76,9 +75,7 @@ namespace nes::emulator
                                         keyboard_state[SDL_SCANCODE_D      ] << 7);
 
             for (; acc_update_time >= secs_per_update; acc_update_time -= secs_per_update)
-            {
                 for (auto i = instrs_per_update; i--;) cpu.instruction();
-            }
 
             if (ppu.new_frame())
             {
@@ -102,23 +99,8 @@ namespace nes::emulator
 
                 ::SDL_LockTexture(texture, nullptr, reinterpret_cast<void**>(&pixels), &pitch);
 
-                for (int i = 0; i < 240; ++i)
-                {
-                    for (int j = 0; j < 256; ++j)
-                    {
-                        unsigned char r = framebuffer[i * 256 + j] >> 16 & 255;
-                        unsigned char g = framebuffer[i * 256 + j] >>  8 & 255;
-                        unsigned char b = framebuffer[i * 256 + j] >>  0 & 255;
-                        if (i % 2)
-                        {
-                            static unsigned val = (r + g + b) / 5;
-                            r = r >= val ? r - std::rand() % (val + 1) : r + std::rand() % (val + 1);
-                            g = g >= val ? g - std::rand() % (val + 1) : g + std::rand() % (val + 1);
-                            b = b >= val ? b - std::rand() % (val + 1) : b + std::rand() % (val + 1);
-                        }
-                        pixels[i * 256 + j] = 0xFF000000 | (r << 16 | g << 8 | b);
-                    }
-                }
+                for (int i = 0; i < 240 * 256; ++i)
+                    pixels[i] = 0xFF000000 | framebuffer[i];
 
                 ::SDL_UnlockTexture(texture);
             }
