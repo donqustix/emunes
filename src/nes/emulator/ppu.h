@@ -161,8 +161,7 @@ namespace nes::emulator
         void open_bus_write_oam_addr() noexcept {   oam_addr     = open_bus_data;}
         void open_bus_write_oam_data() noexcept
         {
-            //if (!(mask & MASK_MASK_RENDERING_ENABLED) || (scanline >= 240 && scanline != 261))
-                oam[oam_addr++] = open_bus_data; oam_addr &= 255;
+            oam[oam_addr++] = open_bus_data; oam_addr &= 255;
         }
 
         void open_bus_write_scroll() noexcept
@@ -252,16 +251,16 @@ namespace nes::emulator
             {
                 open_bus_addr = 0x1000 * (sprite.id & 1) + 16 * (sprite.id & 0xFE) + ((diff_y_flip & 8) << 1) +
                                                                          8 * high  +  (diff_y_flip & 7);
-                return diff < 16 && scanline != 239;
+                return diff < 16 && scanline < 239;
             }
             else
             {
                 open_bus_addr = 0x1000 * sprite_pattern_table_address() + 16 * sprite.id + 8 * high + (diff_y_flip & 7);
-                return diff  < 8 && scanline != 239;
+                return diff  < 8 && scanline < 239;
             }
         }
 
-        unsigned sprite_pixel(unsigned &spr_pal, bool &spr_behind_bg, bool &spr_is_s0)
+        unsigned sprite_pixel(unsigned &spr_pal, bool &spr_behind_bg, bool &spr_is_s0) noexcept
         {
             const unsigned x = clks - 1;
             if (!(mask & MASK_MASK_SHOW_SPRITES) || (!(mask & MASK_MASK_SHOW_SPRITES_LEFTMOST_8_PIXELS) && x < 8))

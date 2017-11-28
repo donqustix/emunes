@@ -1,4 +1,153 @@
 
+/*
+        stop_thread = true;
+
+        std::unique_lock lock_guard{mx};
+        cv.wait(lock_guard, [&thread_finished]{return !thread_finished;});*/
+        /*
+        std::atomic<bool> stop_thread = false;
+        std::mutex mx;
+        std::condition_variable cv;
+        bool thread_finished = false;
+        std::thread t{[&]
+        {
+            try
+            {
+                const SDLNet sdl_net;
+
+                IPaddress ip_address;
+                if (::SDLNet_ResolveHost(&ip_address, nullptr, port) == -1)
+                    throw std::runtime_error{::SDLNet_GetError()};
+
+                SDLNetSocketSet socket_set{3};
+                socket_set.add_tcp_socket(SDLNetTCPsocket::open(&ip_address));
+
+                while (!stop_thread)
+                {
+                    const int sockets_status = ::SDLNet_CheckSockets(socket_set.handle, 1000);
+                    if (sockets_status != -1 && sockets_status)
+                    {
+                        auto iter_server = socket_set.tcp_sockets.begin();
+                        for (auto iter = std::next(iter_server); iter != socket_set.tcp_sockets.end(); ++iter)
+                        {
+                            if (::SDLNet_SocketReady(iter->handle) > 0)
+                            {
+                                unsigned char control;
+                                if (!::SDLNet_TCP_Recv(iter->handle, &control, 1))
+                                    socket_set.del_tcp_socket(iter--);
+                                else
+                                {
+                                    switch (static auto player = std::distance(iter_server, iter); player)
+                                    {
+                                        case 1: controller.set_port_keys<0>(control); break;
+                                        case 2: controller.set_port_keys<1>(control); break;
+                                    }
+                                }
+                            }
+                        }
+                        if (socket_set.tcp_sockets.size() < 3 && ::SDLNet_SocketReady(iter_server->handle))
+                        {
+                            auto new_tcp_socket{SDLNetTCPsocket::accept(iter_server->handle)};
+                            socket_set.add_tcp_socket(std::move(new_tcp_socket));
+                        }
+                    }
+                }
+
+                std::unique_lock guard{mx};
+                thread_finished = true;
+                std::notify_all_at_thread_exit(cv, std::move(guard));
+            }
+            catch (const std::exception& ex)
+            {
+                std::cerr << ex.what() << std::endl;
+            }
+        }};
+        t.detach();*/
+
+    void execute(std::string_view filepath)
+    {
+        auto cartridge{nes::emulator::Cartridge::load(filepath)};
+        nes::emulator::CPU cpu;
+        nes::emulator::PPU ppu;
+        nes::emulator::Controller controller;
+
+        nes::emulator::CPU::MemPointers mem_pointers;
+        mem_pointers.ppu            = &ppu;
+        mem_pointers.cartridge      = &cartridge;
+        mem_pointers.controller     = &controller;
+        cpu.set_mem_pointers(mem_pointers);
+
+        nes::emulator::PPU::MemPointers mem_pointers_ppu;
+        mem_pointers_ppu.cartridge      = &cartridge;
+        mem_pointers_ppu.cpu            = &cpu;
+        ppu.set_mem_pointers(mem_pointers_ppu);
+
+        px32 framebuffer[256 * 240];
+        ppu.set_pixel_output(framebuffer);
+
+        ::SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER);
+        SDL_Window* const window = ::SDL_CreateWindow("emunes", 0, 0, 1366, 768, SDL_WINDOW_RESIZABLE);
+        SDL_Renderer* const renderer = ::SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+        SDL_Texture* const texture = ::SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
+                SDL_TEXTUREACCESS_STREAMING, 256, 240);
+
+        ::SDL_RenderSetLogicalSize(renderer, 256, 240);
+        ::SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
+
+        constexpr unsigned secs_per_update = 1000 / 60, instrs_per_update = 11000;
+        unsigned acc_update_time = 0;
+
+        Uint32 previous_time = ::SDL_GetTicks();
+
+        for (bool running = true; running;)
+        {
+            const Uint32 current_time = ::SDL_GetTicks();
+            const Uint32 elapsed_time = current_time - previous_time;
+            previous_time = current_time;
+
+            acc_update_time += elapsed_time;
+
+            ::SDL_PumpEvents();
+
+            const Uint8* const keyboard_state = ::SDL_GetKeyboardState(nullptr);
+
+            if (keyboard_state[SDL_SCANCODE_ESCAPE]) running = false;
+
+            controller.set_port_keys<0>(keyboard_state[SDL_SCANCODE_SPACE  ] << 0 |
+                                        keyboard_state[SDL_SCANCODE_F      ] << 1 |
+                                        keyboard_state[SDL_SCANCODE_Q      ] << 2 |
+                                        keyboard_state[SDL_SCANCODE_RETURN ] << 3 |
+                                        keyboard_state[SDL_SCANCODE_W      ] << 4 |
+                                        keyboard_state[SDL_SCANCODE_S      ] << 5 |
+                                        keyboard_state[SDL_SCANCODE_A      ] << 6 |
+                                        keyboard_state[SDL_SCANCODE_D      ] << 7);
+
+            for (; acc_update_time >= secs_per_update; acc_update_time -= secs_per_update)
+                for (auto i = instrs_per_update; i--;) cpu.instruction();
+
+            if (ppu.new_frame())
+            {
+                Uint32* pixels;
+                int pitch;
+
+                ::SDL_LockTexture(texture, nullptr, reinterpret_cast<void**>(&pixels), &pitch);
+
+                for (int i = 0; i < 240 * 256; ++i)
+                    pixels[i] = 0xFF000000 | framebuffer[i];
+
+                ::SDL_UnlockTexture(texture);
+            }
+
+            ::SDL_RenderClear(renderer);
+            ::SDL_RenderCopy(renderer, texture, nullptr, nullptr);
+            ::SDL_RenderPresent(renderer);
+        }
+
+        ::SDL_DestroyTexture(texture);
+        ::SDL_DestroyRenderer(renderer);
+        ::SDL_DestroyWindow(window);
+        ::SDL_Quit();
+    }
                 /*
                 for (int i = 0; i < 240; ++i)
                 {

@@ -10,14 +10,23 @@ namespace nes::emulator
         unsigned char port_1,     port_2,
                       port_1_buf, port_2_buf;
         bool strobe;
+
+        template<bool port>
+        unsigned get_port_keys() noexcept
+        {
+            unsigned temp;
+            if constexpr (port) temp = port_2_buf;
+            else                temp = port_1_buf;
+            return temp;
+        }
     public:
         void write(u8 value) noexcept
         {
             strobe = value & 1;
             if (strobe)
             {
-                port_1 = port_1_buf;
-                port_2 = port_2_buf;
+                port_1 = get_port_keys<0>();
+                port_2 = get_port_keys<1>();
             }
         }
 

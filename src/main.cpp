@@ -3,18 +3,123 @@
 #include "nes/emulator/ppu.h"
 #include "nes/emulator/controller.h"
 
+#include <SDL2/SDL_net.h>
 #include <SDL2/SDL.h>
 
 #include <iostream>
-#include <fstream>
+#include <cstring>
+#include <cstdlib>
+#include <iterator>
+#include <list>
 
-using namespace nes::emulator;
-
-namespace nes::emulator
+namespace
 {
-    void execute(std::string_view filepath)
+    struct SDLNet
     {
-        auto cartridge{nes::emulator::Cartridge::load(filepath)};
+        SDLNet() {if (::SDLNet_Init() == -1) throw std::runtime_error{::SDLNet_GetError()};}
+        ~SDLNet() {::SDLNet_Quit();}
+    };
+
+    struct SDLNetTCPsocket
+    {
+        TCPsocket handle;
+        static SDLNetTCPsocket open(IPaddress* ip_address)
+        {
+            TCPsocket tcp_socket;
+            if ((tcp_socket = ::SDLNet_TCP_Open(ip_address)) == nullptr)
+                throw std::runtime_error{::SDLNet_GetError()};
+            return SDLNetTCPsocket{tcp_socket};
+        }
+        static SDLNetTCPsocket accept(TCPsocket server_tcp_socket)
+        {
+            TCPsocket tcp_socket;
+            if ((tcp_socket = ::SDLNet_TCP_Accept(server_tcp_socket)) == nullptr)
+                throw std::runtime_error{::SDLNet_GetError()};
+            return SDLNetTCPsocket{tcp_socket};
+        }
+        explicit SDLNetTCPsocket(TCPsocket handle) noexcept : handle{handle} {}
+        SDLNetTCPsocket(SDLNetTCPsocket&& tcp_socket) noexcept : handle{tcp_socket.handle} {tcp_socket.handle = nullptr;}
+        SDLNetTCPsocket(const SDLNetTCPsocket&) = delete;
+        SDLNetTCPsocket& operator=(const SDLNetTCPsocket&) = delete;
+        ~SDLNetTCPsocket() {if (handle) ::SDLNet_TCP_Close(handle);}
+    };
+
+    struct SDLNetSocketSet
+    {
+        std::list<SDLNetTCPsocket> tcp_sockets;
+        SDLNet_SocketSet handle;
+        explicit SDLNetSocketSet(int size)
+        {
+            if ((handle = ::SDLNet_AllocSocketSet(size)) == nullptr)
+                throw std::runtime_error{::SDLNet_GetError()};
+        }
+        SDLNetSocketSet(const SDLNetSocketSet&) = delete;
+        SDLNetSocketSet& operator=(const SDLNetSocketSet&) = delete;
+        ~SDLNetSocketSet()
+        {
+            for (auto& s : tcp_sockets) ::SDLNet_TCP_DelSocket(handle, s.handle);
+            ::SDLNet_FreeSocketSet(handle);
+        }
+        void add_tcp_socket(SDLNetTCPsocket tcp_socket)
+        {
+            ::SDLNet_TCP_AddSocket(handle, tcp_socket.handle);
+            tcp_sockets.push_back(std::move(tcp_socket));
+        }
+        void del_tcp_socket(decltype(tcp_sockets)::const_iterator iter)
+        {
+            ::SDLNet_TCP_DelSocket(handle, iter->handle);
+            tcp_sockets.erase(iter);
+        }
+    };
+
+    struct SDL
+    {
+        explicit SDL(Uint32 flags) {if (::SDL_Init(flags) < 0) throw std::runtime_error{::SDL_GetError()};}
+        ~SDL() {::SDL_Quit();}
+    };
+
+    struct SDLwindow
+    {
+        SDL_Window* handle;
+        SDLwindow(const char* title, int x, int y, int w, int h, Uint32 flags = SDL_WINDOW_RESIZABLE)
+        {
+            if ((handle = ::SDL_CreateWindow(title, x, y, w, h, flags)) == nullptr)
+                throw std::runtime_error{::SDL_GetError()};
+        }
+        SDLwindow(const SDLwindow&) = delete;
+        SDLwindow& operator=(const SDLwindow&) = delete;
+        ~SDLwindow() {::SDL_DestroyWindow(handle);}
+    };
+
+    struct SDLrenderer
+    {
+        SDL_Renderer* handle;
+        explicit SDLrenderer(SDL_Window* window)
+        {
+            if ((handle = ::SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED)) == nullptr)
+                throw std::runtime_error{::SDL_GetError()};
+        }
+        SDLrenderer(const SDLrenderer&) = delete;
+        SDLrenderer& operator=(const SDLrenderer&) = delete;
+        ~SDLrenderer() {::SDL_DestroyRenderer(handle);}
+    };
+
+    struct SDLtexture
+    {
+        SDL_Texture* handle;
+        SDLtexture(SDL_Renderer* renderer, Uint32 format, int access, int w, int h)
+        {
+            if ((handle = ::SDL_CreateTexture(renderer, format, access, w, h)) == nullptr)
+                throw std::runtime_error{::SDL_GetError()};
+        }
+        SDLtexture(const SDLtexture&) = delete;
+        SDLtexture& operator=(const SDLtexture&) = delete;
+        ~SDLtexture() {::SDL_DestroyTexture(handle);}
+    };
+
+    void make_server(const char* rom, int port)
+    {
+        auto cartridge{nes::emulator::Cartridge::load(rom)};
         nes::emulator::CPU cpu;
         nes::emulator::PPU ppu;
         nes::emulator::Controller controller;
@@ -30,17 +135,22 @@ namespace nes::emulator
         mem_pointers_ppu.cpu            = &cpu;
         ppu.set_mem_pointers(mem_pointers_ppu);
 
-        px32 framebuffer[256 * 240];
+        nes::emulator::px32 framebuffer[256 * 240];
         ppu.set_pixel_output(framebuffer);
 
-        ::SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER);
-        SDL_Window* const window = ::SDL_CreateWindow("emunes", 0, 0, 1366, 768, SDL_WINDOW_RESIZABLE);
-        SDL_Renderer* const renderer = ::SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-        SDL_Texture* const texture = ::SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
-                SDL_TEXTUREACCESS_STREAMING, 256, 240);
+        const SDL sdl{SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER};
+        const SDLwindow window{"emunes-server", 0, 0, 256 * 2, 240 * 2};
+        const SDLrenderer renderer{window.handle};
+        const SDLtexture texture{renderer.handle, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 256, 240};
 
-        ::SDL_RenderSetLogicalSize(renderer, 256, 240);
-        ::SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
+        const SDLNet sdl_net;
+
+        IPaddress ip_address;
+        if (::SDLNet_ResolveHost(&ip_address, nullptr, port) == -1)
+            throw std::runtime_error{::SDLNet_GetError()};
+
+        SDLNetSocketSet socket_set{3};
+        socket_set.add_tcp_socket(SDLNetTCPsocket::open(&ip_address));
 
         constexpr unsigned secs_per_update = 1000 / 60, instrs_per_update = 11000;
         unsigned acc_update_time = 0;
@@ -55,74 +165,172 @@ namespace nes::emulator
 
             acc_update_time += elapsed_time;
 
+            const int sockets_status = ::SDLNet_CheckSockets(socket_set.handle, 0);
+            if (sockets_status > 0)
+            {
+                auto iter_server = socket_set.tcp_sockets.begin();
+                unsigned player = 0;
+                for (auto iter = std::next(iter_server); iter != socket_set.tcp_sockets.end(); ++iter, ++player)
+                {
+                    if (::SDLNet_SocketReady(iter->handle))
+                    {
+                        unsigned char control;
+                        if (!::SDLNet_TCP_Recv(iter->handle, &control, 1))
+                            socket_set.del_tcp_socket(iter--);
+                        else
+                        {
+                            switch (player)
+                            {
+                                case 0: controller.set_port_keys<0>(control); break;
+                                case 1: controller.set_port_keys<1>(control); break;
+                            }
+                        }
+                    }
+                }
+                if (socket_set.tcp_sockets.size() < 4 && ::SDLNet_SocketReady(iter_server->handle))
+                {
+                    auto new_tcp_socket{SDLNetTCPsocket::accept(iter_server->handle)};
+                    socket_set.add_tcp_socket(std::move(new_tcp_socket));
+                }
+            }
+
             ::SDL_PumpEvents();
 
             const Uint8* const keyboard_state = ::SDL_GetKeyboardState(nullptr);
 
-            static bool triggered = false, latch = false;
-
             if (keyboard_state[SDL_SCANCODE_ESCAPE]) running = false;
-            if (keyboard_state[SDL_SCANCODE_P]) triggered = true;
-            else if (triggered) {triggered = false; latch = true;}
-
-            controller.set_port_keys<0>(keyboard_state[SDL_SCANCODE_SPACE  ] << 0 |
-                                        keyboard_state[SDL_SCANCODE_F      ] << 1 |
-                                        keyboard_state[SDL_SCANCODE_Q      ] << 2 |
-                                        keyboard_state[SDL_SCANCODE_RETURN ] << 3 |
-                                        keyboard_state[SDL_SCANCODE_W      ] << 4 |
-                                        keyboard_state[SDL_SCANCODE_S      ] << 5 |
-                                        keyboard_state[SDL_SCANCODE_A      ] << 6 |
-                                        keyboard_state[SDL_SCANCODE_D      ] << 7);
 
             for (; acc_update_time >= secs_per_update; acc_update_time -= secs_per_update)
                 for (auto i = instrs_per_update; i--;) cpu.instruction();
 
             if (ppu.new_frame())
             {
-                if (latch)
+                static constexpr int framebuffer_size = 256 * 240 * sizeof (nes::emulator::px32);
+                for (auto iter  = std::next(socket_set.tcp_sockets.begin());
+                          iter !=           socket_set.tcp_sockets.end(); ++iter)
                 {
-                    static unsigned i = 0;
-                    std::ofstream stream{"res/images/screenshot" + std::to_string(i++) + ".ppm", std::ios::out | std::ios::binary};
-                    stream << "P6\n" << 256 << ' ' << 240 << '\n' << 255 << '\n';
-                    for (int i = 0; i < 256 * 240; ++i)
-                    {
-                        const unsigned char r = framebuffer[i] >>  0 & 255;
-                        const unsigned char g = framebuffer[i] >>  8 & 255;
-                        const unsigned char b = framebuffer[i] >> 16 & 255;
-                        stream.put(r);stream.put(g);stream.put(b);
-                    }
-                    latch = false;
+                    if (::SDLNet_TCP_Send(iter->handle, framebuffer, framebuffer_size) < framebuffer_size)
+                        socket_set.del_tcp_socket(iter--);
                 }
 
                 Uint32* pixels;
                 int pitch;
 
-                ::SDL_LockTexture(texture, nullptr, reinterpret_cast<void**>(&pixels), &pitch);
+                ::SDL_LockTexture(texture.handle, nullptr, reinterpret_cast<void**>(&pixels), &pitch);
 
                 for (int i = 0; i < 240 * 256; ++i)
                     pixels[i] = 0xFF000000 | framebuffer[i];
 
-                ::SDL_UnlockTexture(texture);
+                ::SDL_UnlockTexture(texture.handle);
             }
 
-            ::SDL_RenderClear(renderer);
-            ::SDL_RenderCopy(renderer, texture, nullptr, nullptr);
-            ::SDL_RenderPresent(renderer);
+            ::SDL_RenderClear(renderer.handle);
+            ::SDL_RenderCopy(renderer.handle, texture.handle, nullptr, nullptr);
+            ::SDL_RenderPresent(renderer.handle);
         }
+    }
 
-        ::SDL_DestroyTexture(texture);
-        ::SDL_DestroyRenderer(renderer);
-        ::SDL_DestroyWindow(window);
-        ::SDL_Quit();
+    void make_client(const char*  ip, int port)
+    {
+        const SDLNet sdl_net;
+
+        IPaddress ip_address;
+        if (::SDLNet_ResolveHost(&ip_address, ip, port) == -1)
+            throw std::runtime_error{::SDLNet_GetError()};
+
+        SDLNetSocketSet socket_set{1};
+        socket_set.add_tcp_socket(SDLNetTCPsocket::open(&ip_address));
+
+        const SDL sdl{SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER};
+        const SDLwindow window{"emunes-client", 0, 0, 256 * 2, 240 * 2};
+        const SDLrenderer renderer{window.handle};
+        const SDLtexture texture{renderer.handle, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 256, 240};
+
+        for (bool running = true; running;)
+        {
+            ::SDL_PumpEvents();
+
+            const Uint8* const keyboard_state = ::SDL_GetKeyboardState(nullptr);
+
+            if (keyboard_state[SDL_SCANCODE_ESCAPE]) running = false;
+
+            static unsigned prev_control = 0;
+            const unsigned char control = keyboard_state[SDL_SCANCODE_SPACE  ] << 0 |
+                                          keyboard_state[SDL_SCANCODE_F      ] << 1 |
+                                          keyboard_state[SDL_SCANCODE_Q      ] << 2 |
+                                          keyboard_state[SDL_SCANCODE_RETURN ] << 3 |
+                                          keyboard_state[SDL_SCANCODE_W      ] << 4 |
+                                          keyboard_state[SDL_SCANCODE_S      ] << 5 |
+                                          keyboard_state[SDL_SCANCODE_A      ] << 6 |
+                                          keyboard_state[SDL_SCANCODE_D      ] << 7;
+            if (prev_control != control)
+            {
+                if (!::SDLNet_TCP_Send(socket_set.tcp_sockets.front().handle, &control, 1))
+                    throw std::runtime_error{::SDLNet_GetError()};
+                prev_control = control;
+            }
+
+            if (::SDLNet_CheckSockets(socket_set.handle, 0) > 0)
+            {
+                auto& server_tcp_socket = socket_set.tcp_sockets.front();
+                if (::SDLNet_SocketReady(server_tcp_socket.handle))
+                {
+                    static constexpr int framebuffer_size = 256 * 240 * sizeof (nes::emulator::px32);
+                    nes::emulator::px32 framebuffer[framebuffer_size];
+                    int received_size = ::SDLNet_TCP_Recv(server_tcp_socket.handle, framebuffer, framebuffer_size);
+                    while (received_size < framebuffer_size)
+                    {
+                        if (::SDLNet_CheckSockets(socket_set.handle, 0) && ::SDLNet_SocketReady(server_tcp_socket.handle))
+                        {
+                            received_size += 
+                                ::SDLNet_TCP_Recv(server_tcp_socket.handle, framebuffer      + received_size,
+                                                                            framebuffer_size - received_size);
+                        }
+                    }
+
+                    Uint32* pixels;
+                    int pitch;
+
+                    ::SDL_LockTexture(texture.handle, nullptr, reinterpret_cast<void**>(&pixels), &pitch);
+
+                    for (int i = 0; i < 240 * 256; ++i)
+                        pixels[i] = 0xFF000000 | framebuffer[i];
+
+                    ::SDL_UnlockTexture(texture.handle);
+                }
+            }
+
+            ::SDL_RenderClear(renderer.handle);
+            ::SDL_RenderCopy(renderer.handle, texture.handle, nullptr, nullptr);
+            ::SDL_RenderPresent(renderer.handle);
+
+            ::SDL_Delay(1);
+        }
     }
 }
 
+/*
+ * --server rom port
+ * --client  ip port
+ *
+ * --help
+ */
 int main(int argc, char** argv)
 {
     try
     {
-        if (argc != 2) throw std::runtime_error{"input: file path"};
-        nes::emulator::execute(argv[1]);
+        switch (argc)
+        {
+            case 2:
+                if (!std::strcmp(argv[1], "--help"))
+                    std::cout << "options:\n--server rom port\n--client ip port" << std::endl;
+                break;
+            case 4:
+                     if (!std::strcmp(argv[1], "--server")) {make_server(argv[2], std::atoi(argv[3])); break;}
+                else if (!std::strcmp(argv[1], "--client")) {make_client(argv[2], std::atoi(argv[3])); break;}
+            default:
+                throw std::runtime_error{"use '--help' to help yourself"};
+        }
     }
     catch (const std::exception& ex)
     {
