@@ -23,20 +23,16 @@ namespace
     struct SDLNetTCPsocket
     {
         TCPsocket handle;
-        static SDLNetTCPsocket open(IPaddress* ip_address)
-        {
-            TCPsocket tcp_socket;
-            if ((tcp_socket = ::SDLNet_TCP_Open(ip_address)) == nullptr)
-                throw std::runtime_error{::SDLNet_GetError()};
-            return SDLNetTCPsocket{tcp_socket};
-        }
-        static SDLNetTCPsocket accept(TCPsocket server_tcp_socket)
-        {
-            TCPsocket tcp_socket;
-            if ((tcp_socket = ::SDLNet_TCP_Accept(server_tcp_socket)) == nullptr)
-                throw std::runtime_error{::SDLNet_GetError()};
-            return SDLNetTCPsocket{tcp_socket};
-        }
+#define MAKE_CODE(func, arg)                                          \
+    {                                                                 \
+        TCPsocket tcp_socket;                                         \
+        if ((tcp_socket = ::SDLNet_TCP_##func(arg)) == nullptr)       \
+            throw std::runtime_error{::SDLNet_GetError()};            \
+        return SDLNetTCPsocket{tcp_socket};                           \
+    }
+        static SDLNetTCPsocket open(IPaddress* ip_address) {MAKE_CODE(Open, ip_address)}
+        static SDLNetTCPsocket accept(TCPsocket server_tcp_socket) {MAKE_CODE(Accept, server_tcp_socket)}
+#undef MAKE_CODE
         explicit SDLNetTCPsocket(TCPsocket handle) noexcept : handle{handle} {}
         SDLNetTCPsocket(SDLNetTCPsocket&& tcp_socket) noexcept : handle{tcp_socket.handle} {tcp_socket.handle = nullptr;}
         SDLNetTCPsocket(const SDLNetTCPsocket&) = delete;
@@ -155,6 +151,8 @@ namespace
         constexpr unsigned secs_per_update = 1000 / 60, instrs_per_update = 11000;
         unsigned acc_update_time = 0;
 
+        SDL_Event event;
+
         Uint32 previous_time = ::SDL_GetTicks();
 
         for (bool running = true; running;)
@@ -164,6 +162,9 @@ namespace
             previous_time = current_time;
 
             acc_update_time += elapsed_time;
+
+            while (::SDL_PollEvent(&event))
+                if (event.type == SDL_QUIT) running = false;
 
             const int sockets_status = ::SDLNet_CheckSockets(socket_set.handle, 0);
             if (sockets_status > 0)
@@ -193,12 +194,6 @@ namespace
                     socket_set.add_tcp_socket(std::move(new_tcp_socket));
                 }
             }
-
-            ::SDL_PumpEvents();
-
-            const Uint8* const keyboard_state = ::SDL_GetKeyboardState(nullptr);
-
-            if (keyboard_state[SDL_SCANCODE_ESCAPE]) running = false;
 
             for (; acc_update_time >= secs_per_update; acc_update_time -= secs_per_update)
                 for (auto i = instrs_per_update; i--;) cpu.instruction();
@@ -246,23 +241,31 @@ namespace
         const SDLrenderer renderer{window.handle};
         const SDLtexture texture{renderer.handle, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 256, 240};
 
+        SDL_Event event;
+
+        bool key_states[SDL_NUM_SCANCODES]{};
+
         for (bool running = true; running;)
         {
-            ::SDL_PumpEvents();
-
-            const Uint8* const keyboard_state = ::SDL_GetKeyboardState(nullptr);
-
-            if (keyboard_state[SDL_SCANCODE_ESCAPE]) running = false;
+            while (::SDL_PollEvent(&event))
+            {
+                switch (event.type)
+                {
+                    case SDL_QUIT: running = false;                              break;
+                    case SDL_KEYDOWN: key_states[event.key.keysym.scancode] = 1; break;
+                    case SDL_KEYUP:   key_states[event.key.keysym.scancode] = 0; break;
+                }
+            }
 
             static unsigned prev_control = 0;
-            const unsigned char control = keyboard_state[SDL_SCANCODE_SPACE  ] << 0 |
-                                          keyboard_state[SDL_SCANCODE_F      ] << 1 |
-                                          keyboard_state[SDL_SCANCODE_Q      ] << 2 |
-                                          keyboard_state[SDL_SCANCODE_RETURN ] << 3 |
-                                          keyboard_state[SDL_SCANCODE_W      ] << 4 |
-                                          keyboard_state[SDL_SCANCODE_S      ] << 5 |
-                                          keyboard_state[SDL_SCANCODE_A      ] << 6 |
-                                          keyboard_state[SDL_SCANCODE_D      ] << 7;
+            const unsigned char control = key_states[SDL_SCANCODE_SPACE  ] << 0 |
+                                          key_states[SDL_SCANCODE_F      ] << 1 |
+                                          key_states[SDL_SCANCODE_Q      ] << 2 |
+                                          key_states[SDL_SCANCODE_RETURN ] << 3 |
+                                          key_states[SDL_SCANCODE_W      ] << 4 |
+                                          key_states[SDL_SCANCODE_S      ] << 5 |
+                                          key_states[SDL_SCANCODE_A      ] << 6 |
+                                          key_states[SDL_SCANCODE_D      ] << 7;
             if (prev_control != control)
             {
                 if (!::SDLNet_TCP_Send(socket_set.tcp_sockets.front().handle, &control, 1))
