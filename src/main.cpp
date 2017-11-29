@@ -278,15 +278,17 @@ namespace
                     static constexpr int framebuffer_size = 256 * 240 * sizeof (nes::emulator::px32);
                     nes::emulator::px32 framebuffer[framebuffer_size];
                     int received_size = ::SDLNet_TCP_Recv(server_tcp_socket.handle, framebuffer, framebuffer_size);
-                    while (received_size < framebuffer_size)
+                    for (unsigned i = 3; i && received_size < framebuffer_size; --i)
                     {
-                        if (::SDLNet_CheckSockets(socket_set.handle, 0) && ::SDLNet_SocketReady(server_tcp_socket.handle))
+                        if (::SDLNet_CheckSockets(socket_set.handle, 1000) && ::SDLNet_SocketReady(server_tcp_socket.handle))
                         {
                             received_size += 
                                 ::SDLNet_TCP_Recv(server_tcp_socket.handle, framebuffer      + received_size,
                                                                             framebuffer_size - received_size);
                         }
                     }
+                    if (received_size < framebuffer_size)
+                        throw std::runtime_error{"received_size < framebuffer_size"};
 
                     Uint32* pixels;
                     int pitch;
