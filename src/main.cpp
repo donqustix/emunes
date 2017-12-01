@@ -6,7 +6,6 @@
 #include <SDL2/SDL_net.h>
 #include <SDL2/SDL.h>
 
-#include <algorithm>
 #include <iostream>
 #include <cstring>
 #include <cstdlib>
@@ -167,8 +166,7 @@ namespace
             while (::SDL_PollEvent(&event))
                 if (event.type == SDL_QUIT) running = false;
 
-            const int sockets_status = ::SDLNet_CheckSockets(socket_set.handle, 0);
-            if (sockets_status > 0)
+            if (::SDLNet_CheckSockets(socket_set.handle, 0) > 0)
             {
                 auto iter_server = socket_set.tcp_sockets.begin();
                 unsigned player = 0;
@@ -184,13 +182,10 @@ namespace
                             if (::SDLNet_TCP_Send(iter->handle, framebuffer_temp, framebuffer_size) < framebuffer_size)
                                 socket_set.del_tcp_socket(iter--);
                         }
-                        else
+                        else switch (player)
                         {
-                            switch (player)
-                            {
-                                case 0: controller.set_port_keys<0>(control); break;
-                                case 1: controller.set_port_keys<1>(control); break;
-                            }
+                            case 0: controller.set_port_keys<0>(control); break;
+                            case 1: controller.set_port_keys<1>(control); break;
                         }
                     }
                 }
@@ -206,15 +201,13 @@ namespace
 
             if (ppu.new_frame())
             {
-                std::copy_n(framebuffer, 256 * 240, framebuffer_temp);
-
                 Uint32* pixels;
                 int pitch;
 
                 ::SDL_LockTexture(texture.handle, nullptr, reinterpret_cast<void**>(&pixels), &pitch);
 
                 for (int i = 0; i < 240 * 256; ++i)
-                    pixels[i] = 0xFF000000 | framebuffer_temp[i];
+                    pixels[i] = framebuffer_temp[i] = 0xFF000000 | framebuffer[i];
 
                 ::SDL_UnlockTexture(texture.handle);
             }
@@ -279,38 +272,35 @@ namespace
                 prev_control = control;
             }
 
-            if (::SDLNet_CheckSockets(socket_set.handle, 0) > 0)
+            if (::SDLNet_CheckSockets(socket_set.handle, 0) > 0 && SDLNet_SocketReady(server_tcp_socket.handle))
             {
-                if (::SDLNet_SocketReady(server_tcp_socket.handle))
+                static constexpr int framebuffer_size = 256 * 240 * sizeof (nes::emulator::px32);
+                nes::emulator::px32 framebuffer[framebuffer_size];
+                int received_size = ::SDLNet_TCP_Recv(server_tcp_socket.handle, framebuffer, framebuffer_size);
+                for (unsigned i = 3; i && received_size < framebuffer_size; --i)
                 {
-                    static constexpr int framebuffer_size = 256 * 240 * sizeof (nes::emulator::px32);
-                    nes::emulator::px32 framebuffer[framebuffer_size];
-                    int received_size = ::SDLNet_TCP_Recv(server_tcp_socket.handle, framebuffer, framebuffer_size);
-                    for (unsigned i = 3; i && received_size < framebuffer_size; --i)
+                    if (::SDLNet_CheckSockets(socket_set.handle, 1000) > 0 && ::SDLNet_SocketReady(server_tcp_socket.handle))
                     {
-                        if (::SDLNet_CheckSockets(socket_set.handle, 1000) > 0 && ::SDLNet_SocketReady(server_tcp_socket.handle))
-                        {
-                            received_size += 
-                                ::SDLNet_TCP_Recv(server_tcp_socket.handle, framebuffer      + received_size,
-                                                                            framebuffer_size - received_size);
-                        }
+                        received_size += 
+                            ::SDLNet_TCP_Recv(server_tcp_socket.handle, framebuffer      + received_size,
+                                                                        framebuffer_size - received_size);
                     }
-                    if (received_size < framebuffer_size)
-                        throw std::runtime_error{"received_size < framebuffer_size"};
-
-                    if (!::SDLNet_TCP_Send(server_tcp_socket.handle, &garbage, 1))
-                        throw std::runtime_error{::SDLNet_GetError()};
-
-                    Uint32* pixels;
-                    int pitch;
-
-                    ::SDL_LockTexture(texture.handle, nullptr, reinterpret_cast<void**>(&pixels), &pitch);
-
-                    for (int i = 0; i < 240 * 256; ++i)
-                        pixels[i] = 0xFF000000 | framebuffer[i];
-
-                    ::SDL_UnlockTexture(texture.handle);
                 }
+                if (received_size < framebuffer_size)
+                    throw std::runtime_error{"received_size < framebuffer_size"};
+
+                if (!::SDLNet_TCP_Send(server_tcp_socket.handle, &garbage, 1))
+                    throw std::runtime_error{::SDLNet_GetError()};
+
+                Uint32* pixels;
+                int pitch;
+
+                ::SDL_LockTexture(texture.handle, nullptr, reinterpret_cast<void**>(&pixels), &pitch);
+
+                for (int i = 0; i < 240 * 256; ++i)
+                    pixels[i] = 0xFF000000 | framebuffer[i];
+
+                ::SDL_UnlockTexture(texture.handle);
             }
 
             ::SDL_RenderClear(renderer.handle);
