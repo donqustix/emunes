@@ -131,7 +131,7 @@ namespace
         mem_pointers_ppu.cpu            = &cpu;
         ppu.set_mem_pointers(mem_pointers_ppu);
 
-        nes::emulator::px32 framebuffer[256 * 240], framebuffer_temp[256 * 240];
+        nes::emulator::px32 framebuffer[256 * 240];
         ppu.set_pixel_output(framebuffer);
 
         const SDL sdl{SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER};
@@ -166,6 +166,8 @@ namespace
             while (::SDL_PollEvent(&event))
                 if (event.type == SDL_QUIT) running = false;
 
+            static unsigned busy_sockets = 0;
+
             if (::SDLNet_CheckSockets(socket_set.handle, 0) > 0)
             {
                 auto iter_server = socket_set.tcp_sockets.begin();
@@ -176,12 +178,7 @@ namespace
                     {
                         unsigned char control;
                         if (!::SDLNet_TCP_Recv(iter->handle, &control, 1)) socket_set.del_tcp_socket(iter--);
-                        else if (control == 0xFF)
-                        {
-                            static constexpr int framebuffer_size = 256 * 240 * sizeof (nes::emulator::px32);
-                            if (::SDLNet_TCP_Send(iter->handle, framebuffer_temp, framebuffer_size) < framebuffer_size)
-                                socket_set.del_tcp_socket(iter--);
-                        }
+                        else if (control == 0xFF) --busy_sockets;
                         else switch (player)
                         {
                             case 0: controller.set_port_keys<0>(control); break;
@@ -196,18 +193,29 @@ namespace
                 }
             }
 
+            if (busy_sockets) continue;
+
             for (; acc_update_time >= secs_per_update; acc_update_time -= secs_per_update)
                 for (auto i = instrs_per_update; i--;) cpu.instruction();
 
             if (ppu.new_frame())
             {
+                for (auto iter  = std::next(socket_set.tcp_sockets.begin());
+                          iter !=           socket_set.tcp_sockets.end(); ++iter)
+                {
+                    static constexpr int framebuffer_size = 256 * 240 * sizeof (nes::emulator::px32);
+                    if (::SDLNet_TCP_Send(iter->handle, framebuffer, framebuffer_size) < framebuffer_size)
+                        socket_set.del_tcp_socket(iter--);
+                }
+                busy_sockets = socket_set.tcp_sockets.size() - 1;
+
                 Uint32* pixels;
                 int pitch;
 
                 ::SDL_LockTexture(texture.handle, nullptr, reinterpret_cast<void**>(&pixels), &pitch);
 
                 for (int i = 0; i < 240 * 256; ++i)
-                    pixels[i] = framebuffer_temp[i] = 0xFF000000 | framebuffer[i];
+                    pixels[i] = 0xFF000000 | framebuffer[i];
 
                 ::SDL_UnlockTexture(texture.handle);
             }
@@ -230,10 +238,6 @@ namespace
         socket_set.add_tcp_socket(SDLNetTCPsocket::open(&ip_address));
 
         auto& server_tcp_socket = socket_set.tcp_sockets.front();
-
-        constexpr unsigned char garbage = 0xFF;
-        if (!::SDLNet_TCP_Send(server_tcp_socket.handle, &garbage, 1))
-            throw std::runtime_error{::SDLNet_GetError()};
 
         const SDL sdl{SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER};
         const SDLwindow window{"emunes-client", 0, 0, 256 * 2, 240 * 2};
@@ -289,6 +293,7 @@ namespace
                 if (received_size < framebuffer_size)
                     throw std::runtime_error{"received_size < framebuffer_size"};
 
+                static constexpr unsigned char garbage = 0xFF;
                 if (!::SDLNet_TCP_Send(server_tcp_socket.handle, &garbage, 1))
                     throw std::runtime_error{::SDLNet_GetError()};
 
