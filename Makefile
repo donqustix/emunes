@@ -1,5 +1,5 @@
 CXX = clang++-5.0
-CXXFLAGS = -std=c++1z -pedantic -Wall -Wextra -DNDEBUG -march=native -mtune=native -O2 -Isrc
+CXXFLAGS = -std=c++1z -pthread -pedantic -Wall -Wextra -DNDEBUG -march=native -mtune=native -O2 -Isrc
 LDFLAGS = -lSDL2 -lSDL2_net
 
 PROJECT_NAME = emunes

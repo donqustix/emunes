@@ -11,12 +11,16 @@
 #include <cstdlib>
 #include <iterator>
 #include <list>
+#include <atomic>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
 
 namespace
 {
     struct SDLNet
     {
-        SDLNet() {if (::SDLNet_Init() == -1) throw std::runtime_error{::SDLNet_GetError()};}
+        SDLNet() {if (::SDLNet_Init() < 0) throw std::runtime_error{::SDLNet_GetError()};}
         ~SDLNet() {::SDLNet_Quit();}
     };
 
@@ -131,27 +135,83 @@ namespace
         mem_pointers_ppu.cpu            = &cpu;
         ppu.set_mem_pointers(mem_pointers_ppu);
 
-        nes::emulator::px32 framebuffer[256 * 240];
+        nes::emulator::px32 framebuffer[256 * 240], framebuffer_temp[256 * 240];
         ppu.set_pixel_output(framebuffer);
+
+        std::atomic<bool> stop_thread = false, send_framebuffer = false;
+        bool thread_finished = false;
+        std::mutex framebuffer_mutex;
+        std::condition_variable cv;
+
+        std::thread t{[&] {
+            try
+            {
+                const SDLNet sdl_net;
+
+                IPaddress ip_address;
+                if (::SDLNet_ResolveHost(&ip_address, nullptr, port) < 0)
+                    throw std::runtime_error{::SDLNet_GetError()};
+
+                SDLNetSocketSet socket_set{3};
+                socket_set.add_tcp_socket(SDLNetTCPsocket::open(&ip_address));
+
+                while (!stop_thread)
+                {
+                    if (send_framebuffer)
+                    {
+                        for (auto iter  = std::next(socket_set.tcp_sockets.begin());
+                                  iter !=           socket_set.tcp_sockets.end(); ++iter)
+                        {
+                            static constexpr int framebuffer_size = 256 * 240 * sizeof (nes::emulator::px32);
+                            if (send_framebuffer)
+                            {
+                                const int sent_size = ::SDLNet_TCP_Send(iter->handle, framebuffer_temp, framebuffer_size);
+                                if (sent_size < framebuffer_size)
+                                    socket_set.del_tcp_socket(iter--);
+                                send_framebuffer = false;
+                            }
+                        }
+                    }
+                    if (::SDLNet_CheckSockets(socket_set.handle, 0) > 0)
+                    {
+                        auto tcp_server = socket_set.tcp_sockets.begin();
+                        auto tcp_socket = std::next(tcp_server);
+                        if (tcp_socket != socket_set.tcp_sockets.end() && ::SDLNet_SocketReady(tcp_socket->handle))
+                        {
+                            unsigned char control;
+                            if (!::SDLNet_TCP_Recv(tcp_socket->handle, &control, 1)) socket_set.del_tcp_socket(tcp_socket);
+                            else  controller.set_port_keys<1>(control);
+                        }
+                        if (socket_set.tcp_sockets.size() < 3 && ::SDLNet_SocketReady(tcp_server->handle))
+                        {
+                            auto new_tcp_socket{SDLNetTCPsocket::accept(tcp_server->handle)};
+                            socket_set.add_tcp_socket(std::move(new_tcp_socket));
+                        }
+                    }
+                }
+                std::unique_lock guard{framebuffer_mutex};
+                thread_finished = true;
+                std::notify_all_at_thread_exit(cv, std::move(guard));
+            }
+            catch (const std::exception& ex)
+            {
+                std::cerr << "background thread exception: " << ex.what() << std::endl;
+                thread_finished = true;
+            }
+        }};
+        t.detach();
 
         const SDL sdl{SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER};
         const SDLwindow window{"emunes-server", 0, 0, 256 * 2, 240 * 2};
         const SDLrenderer renderer{window.handle};
         const SDLtexture texture{renderer.handle, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 256, 240};
 
-        const SDLNet sdl_net;
-
-        IPaddress ip_address;
-        if (::SDLNet_ResolveHost(&ip_address, nullptr, port) == -1)
-            throw std::runtime_error{::SDLNet_GetError()};
-
-        SDLNetSocketSet socket_set{3};
-        socket_set.add_tcp_socket(SDLNetTCPsocket::open(&ip_address));
-
         constexpr unsigned secs_per_update = 1000 / 60, instrs_per_update = 11000;
         unsigned acc_update_time = 0;
 
         SDL_Event event;
+
+        bool key_states[SDL_NUM_SCANCODES]{};
 
         Uint32 previous_time = ::SDL_GetTicks();
 
@@ -164,66 +224,51 @@ namespace
             acc_update_time += elapsed_time;
 
             while (::SDL_PollEvent(&event))
-                if (event.type == SDL_QUIT) running = false;
-
-            static unsigned busy_sockets = 0;
-
-            if (::SDLNet_CheckSockets(socket_set.handle, 0) > 0)
             {
-                auto iter_server = socket_set.tcp_sockets.begin();
-                unsigned player = 0;
-                for (auto iter = std::next(iter_server); iter != socket_set.tcp_sockets.end(); ++iter, ++player)
+                switch (event.type)
                 {
-                    if (::SDLNet_SocketReady(iter->handle))
-                    {
-                        unsigned char control;
-                        if (!::SDLNet_TCP_Recv(iter->handle, &control, 1)) socket_set.del_tcp_socket(iter--);
-                        else if (control == 0xFF) --busy_sockets;
-                        else switch (player)
-                        {
-                            case 0: controller.set_port_keys<0>(control); break;
-                            case 1: controller.set_port_keys<1>(control); break;
-                        }
-                    }
-                }
-                if (socket_set.tcp_sockets.size() < 4 && ::SDLNet_SocketReady(iter_server->handle))
-                {
-                    auto new_tcp_socket{SDLNetTCPsocket::accept(iter_server->handle)};
-                    socket_set.add_tcp_socket(std::move(new_tcp_socket));
+                    case SDL_QUIT: running = false;                              break;
+                    case SDL_KEYDOWN: key_states[event.key.keysym.scancode] = 1; break;
+                    case SDL_KEYUP:   key_states[event.key.keysym.scancode] = 0; break;
                 }
             }
 
-            if (busy_sockets) continue;
+            const unsigned char control = key_states[SDL_SCANCODE_SPACE  ] << 0 |
+                                          key_states[SDL_SCANCODE_F      ] << 1 |
+                                          key_states[SDL_SCANCODE_Q      ] << 2 |
+                                          key_states[SDL_SCANCODE_RETURN ] << 3 |
+                                          key_states[SDL_SCANCODE_W      ] << 4 |
+                                          key_states[SDL_SCANCODE_S      ] << 5 |
+                                          key_states[SDL_SCANCODE_A      ] << 6 |
+                                          key_states[SDL_SCANCODE_D      ] << 7;
+            controller.set_port_keys<0>(control);
 
             for (; acc_update_time >= secs_per_update; acc_update_time -= secs_per_update)
                 for (auto i = instrs_per_update; i--;) cpu.instruction();
 
-            if (ppu.new_frame())
+            if (!send_framebuffer)
             {
-                for (auto iter  = std::next(socket_set.tcp_sockets.begin());
-                          iter !=           socket_set.tcp_sockets.end(); ++iter)
-                {
-                    static constexpr int framebuffer_size = 256 * 240 * sizeof (nes::emulator::px32);
-                    if (::SDLNet_TCP_Send(iter->handle, framebuffer, framebuffer_size) < framebuffer_size)
-                        socket_set.del_tcp_socket(iter--);
-                }
-                busy_sockets = socket_set.tcp_sockets.size() - 1;
-
-                Uint32* pixels;
-                int pitch;
-
-                ::SDL_LockTexture(texture.handle, nullptr, reinterpret_cast<void**>(&pixels), &pitch);
-
-                for (int i = 0; i < 240 * 256; ++i)
-                    pixels[i] = 0xFF000000 | framebuffer[i];
-
-                ::SDL_UnlockTexture(texture.handle);
+                for (int i = 0; i < 240 * 256; ++i) framebuffer_temp[i] = framebuffer[i];
+                send_framebuffer = true;
             }
+
+            Uint32* pixels;
+            int pitch;
+
+            ::SDL_LockTexture(texture.handle, nullptr, reinterpret_cast<void**>(&pixels), &pitch);
+
+            for (int i = 0; i < 240 * 246; ++i)
+                pixels[i] = 0xFF000000 | framebuffer[i];
+
+            ::SDL_UnlockTexture(texture.handle);
 
             ::SDL_RenderClear(renderer.handle);
             ::SDL_RenderCopy(renderer.handle, texture.handle, nullptr, nullptr);
             ::SDL_RenderPresent(renderer.handle);
         }
+        stop_thread = true;
+        std::unique_lock guard{framebuffer_mutex};
+        cv.wait(guard, [&] {return thread_finished;});
     }
 
     void make_client(const char*  ip, int port)
@@ -280,22 +325,14 @@ namespace
             {
                 static constexpr int framebuffer_size = 256 * 240 * sizeof (nes::emulator::px32);
                 nes::emulator::px32 framebuffer[framebuffer_size];
-                int received_size = ::SDLNet_TCP_Recv(server_tcp_socket.handle, framebuffer, framebuffer_size);
-                for (unsigned i = 3; i && received_size < framebuffer_size; --i)
+                for (int received_size = 0; received_size < framebuffer_size;)
                 {
-                    if (::SDLNet_CheckSockets(socket_set.handle, 1000) > 0 && ::SDLNet_SocketReady(server_tcp_socket.handle))
-                    {
-                        received_size += 
-                            ::SDLNet_TCP_Recv(server_tcp_socket.handle, framebuffer      + received_size,
-                                                                        framebuffer_size - received_size);
-                    }
+                    const int recv_size = 
+                        ::SDLNet_TCP_Recv(server_tcp_socket.handle, framebuffer      + received_size / sizeof (nes::emulator::px32),
+                                                                    framebuffer_size - received_size);
+                    if (recv_size <= 0) throw std::runtime_error{::SDLNet_GetError()};
+                    received_size += recv_size;
                 }
-                if (received_size < framebuffer_size)
-                    throw std::runtime_error{"received_size < framebuffer_size"};
-
-                static constexpr unsigned char garbage = 0xFF;
-                if (!::SDLNet_TCP_Send(server_tcp_socket.handle, &garbage, 1))
-                    throw std::runtime_error{::SDLNet_GetError()};
 
                 Uint32* pixels;
                 int pitch;
@@ -311,8 +348,6 @@ namespace
             ::SDL_RenderClear(renderer.handle);
             ::SDL_RenderCopy(renderer.handle, texture.handle, nullptr, nullptr);
             ::SDL_RenderPresent(renderer.handle);
-
-            ::SDL_Delay(1);
         }
     }
 }
