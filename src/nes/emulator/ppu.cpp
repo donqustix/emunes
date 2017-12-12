@@ -127,14 +127,14 @@ void PPU::sprite_evaluation() noexcept
             if (oam_copy > 0)
             {
                 --oam_copy;
-                if (!(++     oam_addr &= 0xFF))      oam_addr_overflow = true;
-                if (!(++scan_oam_addr &= 0x1F)) scan_oam_addr_overflow = sprite_overflow_detection = true;
+                if (!(++     oam_addr &= 0xFF)) {     oam_addr_overflow = true;                             oam_copy = 0;}
+                if (!(++scan_oam_addr &= 0x1F)) {scan_oam_addr_overflow = sprite_overflow_detection = true; oam_copy = 0;}
             }
             else if (in_range && !scan_oam_addr_overflow && !oam_addr_overflow)
             {
                 oam_copy = 3;
-                if (!(++     oam_addr &= 0xFF))      oam_addr_overflow = true;
-                if (!(++scan_oam_addr &= 0x1F)) scan_oam_addr_overflow = sprite_overflow_detection = true;
+                if (!(++     oam_addr &= 0xFF)) {     oam_addr_overflow = true;                             oam_copy = 0;}
+                if (!(++scan_oam_addr &= 0x1F)) {scan_oam_addr_overflow = sprite_overflow_detection = true; oam_copy = 0;}
             }
             else if (sprite_overflow_detection)
             {

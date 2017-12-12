@@ -69,7 +69,7 @@ namespace nes::emulator
 
         u8 write_addr_delay = 0;
 
-        bool write_toggle = false, odd_frame_post = false;//, new_frame_post = false;
+        bool write_toggle = false, odd_frame_post = false;
         bool oam_addr_overflow, scan_oam_addr_overflow, sprite_overflow_detection, sprite_overflow = false;
         bool s0_next_scanline, s0_curr_scanline;
 
@@ -201,11 +201,8 @@ namespace nes::emulator
         {
             if (scanline == 241)
             {
-                switch (clks)
-                {
-                    case 1: stat &= ~MASK_STAT_VBLANK;
-                    case 2:case 3: set_cpu_nmi(false); break;
-                }
+                if (        clks == 1) stat &= ~MASK_STAT_VBLANK;
+                if (clks && clks  < 4) set_cpu_nmi(false);
             }
             u8 temp = stat; stat &= ~MASK_STAT_VBLANK; write_toggle = 0;
             open_bus_data &= 31; open_bus_data |= temp & ~31;
@@ -265,21 +262,20 @@ namespace nes::emulator
         {
             const unsigned x = clks - 1;
             if (!(mask & MASK_MASK_SHOW_SPRITES) || (!(mask & MASK_MASK_SHOW_SPRITES_LEFTMOST_8_PIXELS) && x < 8))
-                return 0;
+                return   0;
             for (int i = 0; i < 8; ++i)
             {
                 const unsigned offset = x - sprite.x[i];
-                if (offset < 8)
+                if (offset >= 8) continue;
+
+                const unsigned pat_res = ((sprite.pat_h[i] >> (7 - offset) & 1) << 1) |
+                                          (sprite.pat_l[i] >> (7 - offset) & 1);
+                if (pat_res)
                 {
-                    const unsigned pat_res = ((sprite.pat_h[i] >> (7 - offset) & 1) << 1) |
-                                              (sprite.pat_l[i] >> (7 - offset) & 1);
-                    if (pat_res)
-                    {
-                        spr_pal       = sprite.attr[i] & 0x03;
-                        spr_behind_bg = sprite.attr[i] & 0x20;
-                        spr_is_s0     =            !i && s0_curr_scanline;
-                        return pat_res;
-                    }
+                    spr_pal       = sprite.attr[i] & 0x03;
+                    spr_behind_bg = sprite.attr[i] & 0x20;
+                    spr_is_s0     =            !i && s0_curr_scanline;
+                    return pat_res;
                 }
             }
             return 0;
@@ -320,13 +316,6 @@ namespace nes::emulator
         void set_mem_pointers(const MemPointers& mem_pointers) noexcept {this->mem_pointers = mem_pointers;}
         void set_pixel_output(px32* pixel_output) noexcept {this->pixel_output = pixel_output;}
         bool odd_frame() noexcept {return odd_frame_post;}
-        //bool new_frame() noexcept
-        //{
-        //    const bool temp = new_frame_post; new_frame_post = false;
-        //    return     temp;
-        //}
-
-        //const px32* get_framebuffer() const noexcept {return framebuffer;}
         void tick() noexcept;
     };
 }
