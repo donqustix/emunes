@@ -1,9 +1,9 @@
-CXX = clang++-5.0
-CXXFLAGS = -std=c++1z -pthread -pedantic -Wall -Wextra -DNDEBUG -march=native -mtune=native -O2 -Isrc
-LDFLAGS = -lSDL2 -lSDL2_net
+CXX = g++
+CXXFLAGS = -std=c++17 -pedantic -Wall -Wextra -DNDEBUG -O2 -Isrc -march=native -mtune=native
+LDFLAGS = -lSDL2
 
 PROJECT_NAME = emunes
-PROJECT_SRCS = $(wildcard src/*.cpp) $(wildcard src/*/*/*.cpp)
+PROJECT_SRCS = $(wildcard src/*.cpp) $(wildcard src/*/*/*.cpp) $(wildcard src/*/*/*/*/*.cpp) $(wildcard src/*/*/*/*/*/*.cpp)
 
 all: $(PROJECT_SRCS)
 	$(CXX) $(CXXFLAGS) $^ -o bin/$(PROJECT_NAME) $(LDFLAGS)

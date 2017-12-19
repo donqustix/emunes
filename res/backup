@@ -1,4 +1,59 @@
 
+    /*
+    struct SDLNet
+    {
+        SDLNet() {if (::SDLNet_Init() < 0) throw std::runtime_error{::SDLNet_GetError()};}
+        ~SDLNet() {::SDLNet_Quit();}
+    };
+
+    struct SDLNetTCPsocket
+    {
+        TCPsocket handle;
+#define MAKE_CODE(func, arg)                                          \
+    {                                                                 \
+        TCPsocket tcp_socket;                                         \
+        if ((tcp_socket = ::SDLNet_TCP_##func(arg)) == nullptr)       \
+            throw std::runtime_error{::SDLNet_GetError()};            \
+        return SDLNetTCPsocket{tcp_socket};                           \
+    }
+        static SDLNetTCPsocket open(IPaddress* ip_address) {MAKE_CODE(Open, ip_address)}
+        static SDLNetTCPsocket accept(TCPsocket server_tcp_socket) {MAKE_CODE(Accept, server_tcp_socket)}
+#undef MAKE_CODE
+        explicit SDLNetTCPsocket(TCPsocket handle) noexcept : handle{handle} {}
+        SDLNetTCPsocket(SDLNetTCPsocket&& tcp_socket) noexcept : handle{tcp_socket.handle} {tcp_socket.handle = nullptr;}
+        SDLNetTCPsocket(const SDLNetTCPsocket&) = delete;
+        SDLNetTCPsocket& operator=(const SDLNetTCPsocket&) = delete;
+        ~SDLNetTCPsocket() {if (handle) ::SDLNet_TCP_Close(handle);}
+    };
+
+    struct SDLNetSocketSet
+    {
+        std::list<SDLNetTCPsocket> tcp_sockets;
+        SDLNet_SocketSet handle;
+        explicit SDLNetSocketSet(int size)
+        {
+            if ((handle = ::SDLNet_AllocSocketSet(size)) == nullptr)
+                throw std::runtime_error{::SDLNet_GetError()};
+        }
+        SDLNetSocketSet(const SDLNetSocketSet&) = delete;
+        SDLNetSocketSet& operator=(const SDLNetSocketSet&) = delete;
+        ~SDLNetSocketSet()
+        {
+            for (auto& s : tcp_sockets) ::SDLNet_TCP_DelSocket(handle, s.handle);
+            ::SDLNet_FreeSocketSet(handle);
+        }
+        void add_tcp_socket(SDLNetTCPsocket tcp_socket)
+        {
+            ::SDLNet_TCP_AddSocket(handle, tcp_socket.handle);
+            tcp_sockets.push_back(std::move(tcp_socket));
+        }
+        void del_tcp_socket(decltype(tcp_sockets)::const_iterator iter)
+        {
+            ::SDLNet_TCP_DelSocket(handle, iter->handle);
+            tcp_sockets.erase(iter);
+        }
+    };*/
+-march=native -mtune=native
 /*
         stop_thread = true;
 

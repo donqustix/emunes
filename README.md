@@ -17,11 +17,9 @@ mkdir bin
 make
 ```
 
-Now, you are ready to use the emulator. Put 'emunes --help' in your terminal.
+Now, you are ready to use the emulator.
 
-Use 'emunes --server rom port' to create a server, where 'rom' is a file path.  
-Use 'emunes --client ip port' to connect to a server.  
-Use 'emunes --help' to print the information above.
+Use 'emunes filepath' to load a game.
 
 \*Source code contains **noexcept** keyword.
 

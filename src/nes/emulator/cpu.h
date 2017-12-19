@@ -3,31 +3,24 @@
 
 #include "int_alias.h"
 
+#include "third_party/Nes_Snd_Emu-0.1.7/nes_apu/Nes_Apu.h"
+
 namespace nes::emulator
 {
     class Cartridge;
     class PPU;
     class CPU;
+    class APU;
     class Controller;
 
-    namespace third_party::APU_bisqwit
-    {
-        typedef uint_least8_t   u8;
-        u8 Read(CPU& cpu);
-        void tick(CPU& cpu);
-        struct channel;
-    }
     class CPU final
     {
-        // yes, i'm lazy to make a wrapper
-        friend struct third_party::APU_bisqwit::channel;
-        friend third_party::APU_bisqwit::u8 third_party::APU_bisqwit::Read(CPU&);
-        friend void third_party::APU_bisqwit::tick(CPU&);
     public:
         struct MemPointers
         {
             Controller*     controller;
             PPU*            ppu;
+            APU*            apu;
             Cartridge*      cartridge;
         };
 
@@ -47,12 +40,15 @@ namespace nes::emulator
 
         unsigned char internal_ram[0x800];
 
-        u8   A = 0, X = 0, Y = 0, P = 0, S = 0;
-        u16 PC = 0;
+        u8   A = 0,  X = 0, Y = 0, P = 0, S = 0;
+        u16 PC = 0, op;
+
+        cpu_time_t cpu_end_time;
+        cpu_time_t cpu_time;
 
         InterruptType pending_interrupt = RST;
 
-        bool nmi = false, irq = false;
+        bool nmi = false;
 
         void sync_hardware() noexcept;
 
@@ -74,8 +70,7 @@ namespace nes::emulator
 
         void poll_int() noexcept
         {
-                 if (nmi             ) {pending_interrupt = NMI; nmi = false;}
-            else if (irq && !(P & MI))  pending_interrupt = IRQ;
+            if (nmi) {pending_interrupt = NMI; nmi = false;}
         }
 
         u16  zp() noexcept {const u16 a = rb(PC++);  PC &= 0xFFFF; return a;}
@@ -286,15 +281,51 @@ namespace nes::emulator
             pending_interrupt = NuLL;
         }
 
+        cpu_time_t earliest_irq_before(cpu_time_t end_time) noexcept;
+
+        void run_cpu_until(cpu_time_t end_time) noexcept
+        {
+            while (cpu_time < end_time)
+            {
+                cpu_end_time = earliest_irq_before(end_time);
+                if (cpu_end_time <= cpu_time)
+                {
+                    INT<IRQ>();
+                    cpu_end_time = end_time;
+                }
+                emulate_cpu();
+            }
+        }
+
+        void emulate_cpu() noexcept
+        {
+            while (cpu_time < cpu_end_time)
+            {
+                instruction();
+                if (op == 0x58) break;
+            }
+        }
+
         void oam_dma(u8 value) noexcept;
 
     public:
         CPU() noexcept {for (int i = 0; i < 0x800; ++i) internal_ram[i] = (i & 4) ? 255 : 0;}
 
+        void irq_changed(void*) noexcept
+        {
+            cpu_end_time = earliest_irq_before(cpu_end_time);
+        }
+
+        int dmc_read(void*, cpu_addr_t address) noexcept {return rb(address);}
+
+        void run_cpu(int cycle_count) noexcept {run_cpu_until(cpu_time + cycle_count);}
+        void reset_cpu_time() noexcept {cpu_time = 0;}
+
         void set_mem_pointers(const MemPointers& mem_pointers) noexcept {this->mem_pointers = mem_pointers;}
         void set_nmi(bool nmi) noexcept {this->nmi = nmi;}
-        void set_irq(bool irq) noexcept {this->irq = irq;}
         void instruction() noexcept;
+
+        cpu_time_t get_cpu_time() const noexcept {return cpu_time;}
     };
 }
 

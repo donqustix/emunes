@@ -2,16 +2,26 @@
 
 #include "cartridge.h"
 #include "ppu.h"
+#include "apu.h"
 #include "controller.h"
 
-#include "third_party/apu_bisqwit.h"
-
 using namespace nes::emulator;
+
+cpu_time_t CPU::earliest_irq_before(cpu_time_t end_time) noexcept
+{
+	if (!(P & MI))
+	{
+		const cpu_time_t irq_time = mem_pointers.apu->earliest_irq();
+		if (irq_time < end_time)
+			end_time = irq_time;
+	}
+	return end_time;
+}
 
 void CPU::sync_hardware() noexcept
 {
     for (int i = 0; i < 3; ++i) mem_pointers.ppu->tick();
-    third_party::APU_bisqwit::tick(*this);
+    ++cpu_time;
 }
 
 void CPU::wb(u16 address, u8 value) noexcept
@@ -39,11 +49,9 @@ void CPU::wb(u16 address, u8 value) noexcept
     {
         switch (address)
         {
-            case 0x4014: oam_dma(value);                                     break;
-            case 0x4015: third_party::APU_bisqwit::Write(0x15, value);       break;
-            case 0x4016: mem_pointers.controller->write(value);              break;
-            case 0x4017:
-            default: third_party::APU_bisqwit::Write(address & 0x1F, value); break;
+            case 0x4014: oam_dma(value);                                             break;
+            case 0x4016: mem_pointers.controller->write(value);                      break;
+            default:     mem_pointers.apu->write_register(cpu_time, address, value); break;
         }
     }
     else if (address < 0x4020); // normally disabled
@@ -75,7 +83,7 @@ u8 CPU::rb(u16 address) noexcept
     {
         switch (address)
         {
-            case 0x4015: return third_party::APU_bisqwit::Read(*this);
+            case 0x4015: return mem_pointers.apu->read_status(cpu_time);
             case 0x4016: return mem_pointers.controller->read<0>();
             case 0x4017: return mem_pointers.controller->read<1>();
         }
@@ -97,13 +105,12 @@ void CPU::oam_dma(u8 value) noexcept
 
 void CPU::instruction() noexcept
 {
-    /*opcode fetch*/u16 op = rb(PC++); PC &= 0xFFFF;
+    /*opcode fetch*/ op = rb(PC++); PC &= 0xFFFF;
 
     switch (const u16 i = pending_interrupt; i)
     {
         case RST: op = 0x100; break;
         case NMI: op = 0x101; break;
-        case IRQ: op = 0x102; break; 
     }
 
     switch (op)
@@ -309,7 +316,6 @@ void CPU::instruction() noexcept
         case 0x000: INT<BRK>(); break;
         case 0x100: INT<RST>(); break;
         case 0x101: INT<NMI>(); break;
-        case 0x102: INT<IRQ>(); break;
     }
 }
 

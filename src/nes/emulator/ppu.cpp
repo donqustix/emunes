@@ -63,11 +63,11 @@ void PPU::render_pixel() noexcept
     if (!(mask & MASK_MASK_RENDERING_ENABLED)) pal = (~vaddr & 0x3F00) ? 0 : vaddr & 0x1F;
     else
     {
-        unsigned       bg_pat;
-
-        bool           spr_behind_bg, spr_is_s0;
         unsigned       spr_pal;
+        bool           spr_behind_bg, spr_is_s0;
+
         const unsigned spr_pat = sprite_pixel(spr_pal, spr_behind_bg, spr_is_s0);
+        unsigned        bg_pat;
 
         if (!(mask & MASK_MASK_SHOW_BACKGROUND) || (!(mask & MASK_MASK_SHOW_BACKGROUND_LEFTMOST_8_PIXELS) && x < 8))
             bg_pat = 0;
@@ -223,9 +223,7 @@ void PPU::tick() noexcept
         break;
         case 240:
             if (clks == 1)
-            {
                 for (int i = 0; i < 240 * 256; ++i) pixel_output[i] = framebuffer[i];
-            }
         break;
     }
     if (mask & MASK_MASK_RENDERING_ENABLED)
@@ -233,7 +231,7 @@ void PPU::tick() noexcept
         sprite_operations();
         background_misc();
     }
-    if (write_addr_delay && !--write_addr_delay) {vaddr = tmp_vaddr;}
+    if (write_addr_delay && !--write_addr_delay) vaddr = tmp_vaddr;
     if (++clks > 340)
     {
         if (++scanline == 262) {scanline = 0; odd_frame_post = !odd_frame_post;}

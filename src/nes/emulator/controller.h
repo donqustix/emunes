@@ -3,8 +3,6 @@
 
 #include "int_alias.h"
 
-#include <mutex>
-
 namespace nes::emulator
 {
     class Controller final
@@ -13,12 +11,9 @@ namespace nes::emulator
                       port_1_buf, port_2_buf;
         bool strobe;
 
-        std::mutex mx;
-
         template<bool port>
         unsigned get_port_keys() noexcept
         {
-            std::lock_guard guard{mx};
             unsigned temp;
             if constexpr (port) temp = port_2_buf;
             else                temp = port_1_buf;
@@ -49,7 +44,6 @@ namespace nes::emulator
         template<bool port>
         void set_port_keys(unsigned char keys) noexcept
         {
-            std::lock_guard guard{mx};
             if constexpr (port) port_2_buf = keys;
             else                port_1_buf = keys;
         }

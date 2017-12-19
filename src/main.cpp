@@ -1,84 +1,32 @@
 #include "nes/emulator/cartridge.h"
 #include "nes/emulator/cpu.h"
 #include "nes/emulator/ppu.h"
+#include "nes/emulator/apu.h"
 #include "nes/emulator/controller.h"
 
-#include <SDL2/SDL_net.h>
+#include "nes/emulator/third_party/Nes_Snd_Emu-0.1.7/Sound_Queue.h"
+
 #include <SDL2/SDL.h>
 
 #include <iostream>
 #include <cstring>
 #include <cstdlib>
-#include <iterator>
-#include <list>
-#include <atomic>
-#include <thread>
-#include <mutex>
-#include <condition_variable>
 
 namespace
 {
-    struct SDLNet
+    struct NonCopyable
     {
-        SDLNet() {if (::SDLNet_Init() < 0) throw std::runtime_error{::SDLNet_GetError()};}
-        ~SDLNet() {::SDLNet_Quit();}
+        NonCopyable() = default;
+        NonCopyable(const NonCopyable&) = delete;
+        NonCopyable& operator=(const NonCopyable&) = delete;
     };
-
-    struct SDLNetTCPsocket
-    {
-        TCPsocket handle;
-#define MAKE_CODE(func, arg)                                          \
-    {                                                                 \
-        TCPsocket tcp_socket;                                         \
-        if ((tcp_socket = ::SDLNet_TCP_##func(arg)) == nullptr)       \
-            throw std::runtime_error{::SDLNet_GetError()};            \
-        return SDLNetTCPsocket{tcp_socket};                           \
-    }
-        static SDLNetTCPsocket open(IPaddress* ip_address) {MAKE_CODE(Open, ip_address)}
-        static SDLNetTCPsocket accept(TCPsocket server_tcp_socket) {MAKE_CODE(Accept, server_tcp_socket)}
-#undef MAKE_CODE
-        explicit SDLNetTCPsocket(TCPsocket handle) noexcept : handle{handle} {}
-        SDLNetTCPsocket(SDLNetTCPsocket&& tcp_socket) noexcept : handle{tcp_socket.handle} {tcp_socket.handle = nullptr;}
-        SDLNetTCPsocket(const SDLNetTCPsocket&) = delete;
-        SDLNetTCPsocket& operator=(const SDLNetTCPsocket&) = delete;
-        ~SDLNetTCPsocket() {if (handle) ::SDLNet_TCP_Close(handle);}
-    };
-
-    struct SDLNetSocketSet
-    {
-        std::list<SDLNetTCPsocket> tcp_sockets;
-        SDLNet_SocketSet handle;
-        explicit SDLNetSocketSet(int size)
-        {
-            if ((handle = ::SDLNet_AllocSocketSet(size)) == nullptr)
-                throw std::runtime_error{::SDLNet_GetError()};
-        }
-        SDLNetSocketSet(const SDLNetSocketSet&) = delete;
-        SDLNetSocketSet& operator=(const SDLNetSocketSet&) = delete;
-        ~SDLNetSocketSet()
-        {
-            for (auto& s : tcp_sockets) ::SDLNet_TCP_DelSocket(handle, s.handle);
-            ::SDLNet_FreeSocketSet(handle);
-        }
-        void add_tcp_socket(SDLNetTCPsocket tcp_socket)
-        {
-            ::SDLNet_TCP_AddSocket(handle, tcp_socket.handle);
-            tcp_sockets.push_back(std::move(tcp_socket));
-        }
-        void del_tcp_socket(decltype(tcp_sockets)::const_iterator iter)
-        {
-            ::SDLNet_TCP_DelSocket(handle, iter->handle);
-            tcp_sockets.erase(iter);
-        }
-    };
-
-    struct SDL
+    struct SDL : NonCopyable
     {
         explicit SDL(Uint32 flags) {if (::SDL_Init(flags) < 0) throw std::runtime_error{::SDL_GetError()};}
         ~SDL() {::SDL_Quit();}
     };
 
-    struct SDLwindow
+    struct SDLwindow : NonCopyable
     {
         SDL_Window* handle;
         SDLwindow(const char* title, int x, int y, int w, int h, Uint32 flags = SDL_WINDOW_RESIZABLE)
@@ -86,12 +34,10 @@ namespace
             if ((handle = ::SDL_CreateWindow(title, x, y, w, h, flags)) == nullptr)
                 throw std::runtime_error{::SDL_GetError()};
         }
-        SDLwindow(const SDLwindow&) = delete;
-        SDLwindow& operator=(const SDLwindow&) = delete;
         ~SDLwindow() {::SDL_DestroyWindow(handle);}
     };
 
-    struct SDLrenderer
+    struct SDLrenderer : NonCopyable
     {
         SDL_Renderer* handle;
         explicit SDLrenderer(SDL_Window* window)
@@ -99,12 +45,10 @@ namespace
             if ((handle = ::SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED)) == nullptr)
                 throw std::runtime_error{::SDL_GetError()};
         }
-        SDLrenderer(const SDLrenderer&) = delete;
-        SDLrenderer& operator=(const SDLrenderer&) = delete;
         ~SDLrenderer() {::SDL_DestroyRenderer(handle);}
     };
 
-    struct SDLtexture
+    struct SDLtexture : NonCopyable
     {
         SDL_Texture* handle;
         SDLtexture(SDL_Renderer* renderer, Uint32 format, int access, int w, int h)
@@ -112,20 +56,29 @@ namespace
             if ((handle = ::SDL_CreateTexture(renderer, format, access, w, h)) == nullptr)
                 throw std::runtime_error{::SDL_GetError()};
         }
-        SDLtexture(const SDLtexture&) = delete;
-        SDLtexture& operator=(const SDLtexture&) = delete;
         ~SDLtexture() {::SDL_DestroyTexture(handle);}
     };
 
-    void make_server(const char* rom, int port)
+    nes::emulator::CPU* cpu_pointer;
+    Sound_Queue sound_queue;
+
+    int dmc_read(void* user_data, cpu_addr_t address) noexcept {return cpu_pointer->dmc_read(user_data, address);}
+    void irq_changed(void* user_data) noexcept {cpu_pointer->irq_changed(user_data);}
+    void output_samples(const blip_sample_t* samples, size_t count) noexcept {sound_queue.write(samples, count);}
+
+    void run(const char* rom)
     {
         auto cartridge{nes::emulator::Cartridge::load(rom)};
         nes::emulator::CPU cpu;
         nes::emulator::PPU ppu;
+        nes::emulator::APU apu;
         nes::emulator::Controller controller;
+
+        cpu_pointer = &cpu;
 
         nes::emulator::CPU::MemPointers mem_pointers;
         mem_pointers.ppu            = &ppu;
+        mem_pointers.apu            = &apu;
         mem_pointers.cartridge      = &cartridge;
         mem_pointers.controller     = &controller;
         cpu.set_mem_pointers(mem_pointers);
@@ -135,93 +88,29 @@ namespace
         mem_pointers_ppu.cpu            = &cpu;
         ppu.set_mem_pointers(mem_pointers_ppu);
 
-        nes::emulator::px32 framebuffer[256 * 240], framebuffer_temp[256 * 240];
+        apu.set_cpu_pointer(&cpu);
+        apu.set_irq_changed(::irq_changed);
+        apu.set_dmc_reader(::dmc_read);
+        apu.set_output_samples(::output_samples);
+
+        nes::emulator::px32 framebuffer[256 * 240];
         ppu.set_pixel_output(framebuffer);
 
-        std::atomic<bool> stop_thread = false, send_framebuffer = false;
-        bool thread_finished = false;
-        std::mutex framebuffer_mutex;
-        std::condition_variable cv;
-
-        std::thread t{[&] {
-            try
-            {
-                const SDLNet sdl_net;
-
-                IPaddress ip_address;
-                if (::SDLNet_ResolveHost(&ip_address, nullptr, port) < 0)
-                    throw std::runtime_error{::SDLNet_GetError()};
-
-                SDLNetSocketSet socket_set{3};
-                socket_set.add_tcp_socket(SDLNetTCPsocket::open(&ip_address));
-
-                while (!stop_thread)
-                {
-                    if (send_framebuffer)
-                    {
-                        for (auto iter  = std::next(socket_set.tcp_sockets.begin());
-                                  iter !=           socket_set.tcp_sockets.end(); ++iter)
-                        {
-                            static constexpr int framebuffer_size = 256 * 240 * sizeof (nes::emulator::px32);
-                            if (send_framebuffer)
-                            {
-                                const int sent_size = ::SDLNet_TCP_Send(iter->handle, framebuffer_temp, framebuffer_size);
-                                if (sent_size < framebuffer_size)
-                                    socket_set.del_tcp_socket(iter--);
-                                send_framebuffer = false;
-                            }
-                        }
-                    }
-                    if (::SDLNet_CheckSockets(socket_set.handle, 0) > 0)
-                    {
-                        auto tcp_server = socket_set.tcp_sockets.begin();
-                        auto tcp_socket = std::next(tcp_server);
-                        if (tcp_socket != socket_set.tcp_sockets.end() && ::SDLNet_SocketReady(tcp_socket->handle))
-                        {
-                            unsigned char control;
-                            if (!::SDLNet_TCP_Recv(tcp_socket->handle, &control, 1)) socket_set.del_tcp_socket(tcp_socket);
-                            else  controller.set_port_keys<1>(control);
-                        }
-                        if (socket_set.tcp_sockets.size() < 3 && ::SDLNet_SocketReady(tcp_server->handle))
-                        {
-                            auto new_tcp_socket{SDLNetTCPsocket::accept(tcp_server->handle)};
-                            socket_set.add_tcp_socket(std::move(new_tcp_socket));
-                        }
-                    }
-                }
-                std::unique_lock guard{framebuffer_mutex};
-                thread_finished = true;
-                std::notify_all_at_thread_exit(cv, std::move(guard));
-            }
-            catch (const std::exception& ex)
-            {
-                std::cerr << "background thread exception: " << ex.what() << std::endl;
-                thread_finished = true;
-            }
-        }};
-        t.detach();
-
-        const SDL sdl{SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER};
-        const SDLwindow window{"emunes-server", 0, 0, 256 * 2, 240 * 2};
+        const SDL sdl{SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER | SDL_INIT_AUDIO};
+        const SDLwindow window{"emunes", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 256 * 2, 240 * 2};
         const SDLrenderer renderer{window.handle};
         const SDLtexture texture{renderer.handle, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 256, 240};
 
-        constexpr unsigned secs_per_update = 1000 / 60, instrs_per_update = 11000;
-        unsigned acc_update_time = 0;
+        if (sound_queue.init(44100))
+            throw std::runtime_error{"It's failed to initialize Sound_Queue"};
 
         SDL_Event event;
 
         bool key_states[SDL_NUM_SCANCODES]{};
 
-        Uint32 previous_time = ::SDL_GetTicks();
-
         for (bool running = true; running;)
         {
-            const Uint32 current_time = ::SDL_GetTicks();
-            const Uint32 elapsed_time = current_time - previous_time;
-            previous_time = current_time;
-
-            acc_update_time += elapsed_time;
+            const Uint32 start_time = ::SDL_GetTicks();
 
             while (::SDL_PollEvent(&event))
             {
@@ -243,21 +132,16 @@ namespace
                                           key_states[SDL_SCANCODE_D      ] << 7;
             controller.set_port_keys<0>(control);
 
-            for (; acc_update_time >= secs_per_update; acc_update_time -= secs_per_update)
-                for (auto i = instrs_per_update; i--;) cpu.instruction();
-
-            if (!send_framebuffer)
-            {
-                for (int i = 0; i < 240 * 256; ++i) framebuffer_temp[i] = framebuffer[i];
-                send_framebuffer = true;
-            }
+            cpu.run_cpu(29781);
+            apu.end_time_frame(cpu.get_cpu_time());
+            cpu.reset_cpu_time();
 
             Uint32* pixels;
             int pitch;
 
             ::SDL_LockTexture(texture.handle, nullptr, reinterpret_cast<void**>(&pixels), &pitch);
 
-            for (int i = 0; i < 240 * 246; ++i)
+            for (int i = 0; i < 240 * 256; ++i)
                 pixels[i] = 0xFF000000 | framebuffer[i];
 
             ::SDL_UnlockTexture(texture.handle);
@@ -265,115 +149,21 @@ namespace
             ::SDL_RenderClear(renderer.handle);
             ::SDL_RenderCopy(renderer.handle, texture.handle, nullptr, nullptr);
             ::SDL_RenderPresent(renderer.handle);
-        }
-        stop_thread = true;
-        std::unique_lock guard{framebuffer_mutex};
-        cv.wait(guard, [&] {return thread_finished;});
-    }
 
-    void make_client(const char*  ip, int port)
-    {
-        const SDLNet sdl_net;
-
-        IPaddress ip_address;
-        if (::SDLNet_ResolveHost(&ip_address, ip, port) == -1)
-            throw std::runtime_error{::SDLNet_GetError()};
-
-        SDLNetSocketSet socket_set{1};
-        socket_set.add_tcp_socket(SDLNetTCPsocket::open(&ip_address));
-
-        auto& server_tcp_socket = socket_set.tcp_sockets.front();
-
-        const SDL sdl{SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER};
-        const SDLwindow window{"emunes-client", 0, 0, 256 * 2, 240 * 2};
-        const SDLrenderer renderer{window.handle};
-        const SDLtexture texture{renderer.handle, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 256, 240};
-
-        SDL_Event event;
-
-        bool key_states[SDL_NUM_SCANCODES]{};
-
-        for (bool running = true; running;)
-        {
-            while (::SDL_PollEvent(&event))
-            {
-                switch (event.type)
-                {
-                    case SDL_QUIT: running = false;                              break;
-                    case SDL_KEYDOWN: key_states[event.key.keysym.scancode] = 1; break;
-                    case SDL_KEYUP:   key_states[event.key.keysym.scancode] = 0; break;
-                }
-            }
-
-            static unsigned prev_control = 0;
-            const unsigned char control = key_states[SDL_SCANCODE_SPACE  ] << 0 |
-                                          key_states[SDL_SCANCODE_F      ] << 1 |
-                                          key_states[SDL_SCANCODE_Q      ] << 2 |
-                                          key_states[SDL_SCANCODE_RETURN ] << 3 |
-                                          key_states[SDL_SCANCODE_W      ] << 4 |
-                                          key_states[SDL_SCANCODE_S      ] << 5 |
-                                          key_states[SDL_SCANCODE_A      ] << 6 |
-                                          key_states[SDL_SCANCODE_D      ] << 7;
-            if (prev_control != control)
-            {
-                if (!::SDLNet_TCP_Send(socket_set.tcp_sockets.front().handle, &control, 1))
-                    throw std::runtime_error{::SDLNet_GetError()};
-                prev_control = control;
-            }
-
-            if (::SDLNet_CheckSockets(socket_set.handle, 0) > 0 && SDLNet_SocketReady(server_tcp_socket.handle))
-            {
-                static constexpr int framebuffer_size = 256 * 240 * sizeof (nes::emulator::px32);
-                nes::emulator::px32 framebuffer[framebuffer_size];
-                for (int received_size = 0; received_size < framebuffer_size;)
-                {
-                    const int recv_size = 
-                        ::SDLNet_TCP_Recv(server_tcp_socket.handle, framebuffer      + received_size / sizeof (nes::emulator::px32),
-                                                                    framebuffer_size - received_size);
-                    if (recv_size <= 0) throw std::runtime_error{::SDLNet_GetError()};
-                    received_size += recv_size;
-                }
-
-                Uint32* pixels;
-                int pitch;
-
-                ::SDL_LockTexture(texture.handle, nullptr, reinterpret_cast<void**>(&pixels), &pitch);
-
-                for (int i = 0; i < 240 * 256; ++i)
-                    pixels[i] = 0xFF000000 | framebuffer[i];
-
-                ::SDL_UnlockTexture(texture.handle);
-            }
-
-            ::SDL_RenderClear(renderer.handle);
-            ::SDL_RenderCopy(renderer.handle, texture.handle, nullptr, nullptr);
-            ::SDL_RenderPresent(renderer.handle);
+            const Uint32 elapsed_time = ::SDL_GetTicks() - start_time;
+            if (elapsed_time < 1000 / 60)
+                ::SDL_Delay(   1000 / 60 - elapsed_time);
         }
     }
 }
 
-/*
- * --server rom port
- * --client  ip port
- *
- * --help
- */
 int main(int argc, char** argv)
 {
     try
     {
-        switch (argc)
-        {
-            case 2:
-                if (!std::strcmp(argv[1], "--help"))
-                    std::cout << "options:\n--server rom port\n--client ip port" << std::endl;
-                break;
-            case 4:
-                     if (!std::strcmp(argv[1], "--server")) {make_server(argv[2], std::atoi(argv[3])); break;}
-                else if (!std::strcmp(argv[1], "--client")) {make_client(argv[2], std::atoi(argv[3])); break;}
-            default:
-                throw std::runtime_error{"use '--help' to help yourself"};
-        }
+        if (argc != 2)
+            throw std::runtime_error{"emunes 'filepath'"};
+        ::run(argv[1]);
     }
     catch (const std::exception& ex)
     {
