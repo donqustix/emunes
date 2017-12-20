@@ -41,14 +41,14 @@ namespace nes::emulator
         unsigned char internal_ram[0x800];
 
         u8   A = 0,  X = 0, Y = 0, P = 0, S = 0;
-        u16 PC = 0, op;
+        u16 PC = 0;
 
         cpu_time_t cpu_end_time;
         cpu_time_t cpu_time;
 
         InterruptType pending_interrupt = RST;
 
-        bool nmi = false;
+        bool nmi = false, stop = false;
 
         void sync_hardware() noexcept;
 
@@ -181,7 +181,7 @@ namespace nes::emulator
         void clc() noexcept {poll_int(); rb(PC); P &= ~MC;}
         void cld() noexcept {poll_int(); rb(PC); P &= ~MD;}
         void clv() noexcept {poll_int(); rb(PC); P &= ~MV;}
-        void cli() noexcept {poll_int(); rb(PC); P &= ~MI;}
+        void cli() noexcept {poll_int(); rb(PC); if (P & MI) {P &= ~MI; stop = true;}}
 
         void sei() noexcept {poll_int(); rb(PC); P |= MI;}
         void sec() noexcept {poll_int(); rb(PC); P |= MC;}
@@ -302,7 +302,7 @@ namespace nes::emulator
             while (cpu_time < cpu_end_time)
             {
                 instruction();
-                if (op == 0x58) break;
+                if (stop) {stop = false; break;}
             }
         }
 

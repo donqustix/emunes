@@ -9,13 +9,13 @@ using namespace nes::emulator;
 
 cpu_time_t CPU::earliest_irq_before(cpu_time_t end_time) noexcept
 {
-	if (!(P & MI))
-	{
-		const cpu_time_t irq_time = mem_pointers.apu->earliest_irq();
-		if (irq_time < end_time)
-			end_time = irq_time;
-	}
-	return end_time;
+    if (!(P & MI))
+    {
+        const cpu_time_t irq_time = mem_pointers.apu->earliest_irq();
+        if (irq_time < end_time)
+            end_time = irq_time;
+    }
+    return end_time;
 }
 
 void CPU::sync_hardware() noexcept
@@ -105,7 +105,7 @@ void CPU::oam_dma(u8 value) noexcept
 
 void CPU::instruction() noexcept
 {
-    /*opcode fetch*/ op = rb(PC++); PC &= 0xFFFF;
+    /*opcode fetch*/u16 op = rb(PC++); PC &= 0xFFFF;
 
     switch (const u16 i = pending_interrupt; i)
     {
