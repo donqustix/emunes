@@ -58,8 +58,7 @@ namespace nes::emulator
             bool in_range;
         } sprite;
 
-        px32  framebuffer[256 * 240];
-        px32* pixel_output = nullptr;
+        unsigned char framebuffer[256 * 240], *pixel_output = nullptr;
 
         u8 xfine, nt, at, bg_lo, bg_hi, at_latch_hi, at_latch_lo;
         u8 oam_addr = 0, scan_oam_addr, oam_copy;
@@ -74,6 +73,8 @@ namespace nes::emulator
         bool s0_next_scanline, s0_curr_scanline;
 
         MemPointers mem_pointers;
+
+        int burst_phase = 0;
 
         void memory_write(u16 address, u8 value) noexcept;
         u8 memory_read(u16 address) const noexcept;
@@ -314,7 +315,7 @@ namespace nes::emulator
         }
 
         void set_mem_pointers(const MemPointers& mem_pointers) noexcept {this->mem_pointers = mem_pointers;}
-        void set_pixel_output(px32* pixel_output) noexcept {this->pixel_output = pixel_output;}
+        void set_pixel_output(unsigned char* pixel_output) noexcept {this->pixel_output = pixel_output;}
         bool odd_frame() noexcept {return odd_frame_post;}
         void tick() noexcept;
     };

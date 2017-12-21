@@ -5,6 +5,7 @@
 #include "nes/emulator/controller.h"
 
 #include "nes/emulator/third_party/Nes_Snd_Emu-0.1.7/Sound_Queue.h"
+#include "nes/emulator/third_party/nes_ntsc-0.2.2/nes_ntsc.h"
 
 #include <SDL2/SDL.h>
 
@@ -57,11 +58,10 @@ namespace
         ~SDLtexture() {::SDL_DestroyTexture(handle);}
     };
 
-    nes::emulator::CPU* cpu_pointer;
     Sound_Queue sound_queue;
 
-    int dmc_read(void* user_data, cpu_addr_t address) noexcept {return cpu_pointer->dmc_read(user_data, address);}
-    void irq_changed(void* user_data) noexcept {cpu_pointer->irq_changed(user_data);}
+    int dmc_read(void* user_data, cpu_addr_t address) noexcept {return static_cast<nes::emulator::CPU*>(user_data)->dmc_read(user_data, address);}
+    void irq_changed(void* user_data) noexcept {static_cast<nes::emulator::CPU*>(user_data)->irq_changed(user_data);}
     void output_samples(const blip_sample_t* samples, size_t count) noexcept {sound_queue.write(samples, count);}
 
     void run(const char* rom)
@@ -71,8 +71,6 @@ namespace
         nes::emulator::PPU ppu;
         nes::emulator::APU apu;
         nes::emulator::Controller controller;
-
-        cpu_pointer = &cpu;
 
         nes::emulator::CPU::MemPointers mem_pointers;
         mem_pointers.ppu            = &ppu;
@@ -86,18 +84,32 @@ namespace
         mem_pointers_ppu.cpu            = &cpu;
         ppu.set_mem_pointers(mem_pointers_ppu);
 
-        apu.set_cpu_pointer(&cpu);
-        apu.set_irq_changed(::irq_changed);
-        apu.set_dmc_reader(::dmc_read);
+        apu.set_irq_changed(::irq_changed, &cpu);
+        apu.set_dmc_reader(::dmc_read, &cpu);
         apu.set_output_samples(::output_samples);
 
-        nes::emulator::px32 framebuffer[256 * 240];
+        unsigned char framebuffer[256 * 240];
         ppu.set_pixel_output(framebuffer);
 
+        nes_ntsc_setup_t nes_ntsc_setup = nes_ntsc_composite;
+        nes_ntsc_t nes_ntsc;
+
+        nes_ntsc_setup.merge_fields = 0;
+
+        ::nes_ntsc_init(&nes_ntsc, &nes_ntsc_setup);
+
+        constexpr int ntsc_out_width = NES_NTSC_OUT_WIDTH(256), render_height = 240 * 2;
+
+        std::uint16_t output[ntsc_out_width * 240];
+        int burst_phase = 0;
+
         const SDL sdl{SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER | SDL_INIT_AUDIO};
-        const SDLwindow window{"emunes", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 256 * 2, 240 * 2};
+        const SDLwindow window{"emunes", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 640, 480};
         const SDLrenderer renderer{window.handle};
-        const SDLtexture texture{renderer.handle, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 256, 240};
+        const SDLtexture texture{renderer.handle, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, ntsc_out_width, 240};
+
+        ::SDL_RenderSetLogicalSize(renderer.handle, ntsc_out_width, render_height);
+        //::SDL_SetWindowFullscreen(window.handle, SDL_WINDOW_FULLSCREEN);
 
         if (sound_queue.init(44100))
             throw std::runtime_error{"It's failed to initialize Sound_Queue"};
@@ -120,6 +132,8 @@ namespace
                 }
             }
 
+            if (key_states[SDL_SCANCODE_ESCAPE]) running = false;
+
             const unsigned char control = key_states[SDL_SCANCODE_SPACE  ] << 0 |
                                           key_states[SDL_SCANCODE_F      ] << 1 |
                                           key_states[SDL_SCANCODE_Q      ] << 2 |
@@ -134,13 +148,21 @@ namespace
             apu.end_time_frame(cpu.get_cpu_time());
             cpu.reset_cpu_time();
 
+            burst_phase ^= 1;
+            ::nes_ntsc_blit(&nes_ntsc, framebuffer, 256, burst_phase, 256, 240, output, ntsc_out_width * 2);
+
             Uint32* pixels;
             int pitch;
 
             ::SDL_LockTexture(texture.handle, nullptr, reinterpret_cast<void**>(&pixels), &pitch);
 
-            for (int i = 0; i < 240 * 256; ++i)
-                pixels[i] = 0xFF000000 | framebuffer[i];
+            for (int i = 0; i < ntsc_out_width * 240; ++i)
+            {
+                const unsigned r = (output[i] >> 10 & 31) * 255 / 31;
+                const unsigned g = (output[i] >>  5 & 31) * 255 / 31;
+                const unsigned b = (output[i]       & 31) * 255 / 31;
+                pixels[i] = 0xFF000000 | r << 16 | g << 8 | b;
+            }
 
             ::SDL_UnlockTexture(texture.handle);
 
