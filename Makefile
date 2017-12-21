@@ -3,7 +3,7 @@ CXXFLAGS = -std=c++17 -pedantic -Wall -Wextra -DNDEBUG -Os -Isrc -march=native -
 LDFLAGS = -lSDL2
 
 PROJECT_NAME = emunes
-PROJECT_SRCS = $(wildcard src/*.cpp) $(wildcard src/*/*/*.cpp) $(wildcard src/*/*/*/*/*.cpp) $(wildcard src/*/*/*/*/*/*.cpp)
+PROJECT_SRCS = $(wildcard src/*.cpp) $(wildcard src/*/*/*.cpp) $(wildcard src/*/*/*/*/*.cpp) $(wildcard src/*/*/*/*/*.c) $(wildcard src/*/*/*/*/*/*.cpp)
 
 all: $(PROJECT_SRCS)
 	$(CXX) $(CXXFLAGS) $^ -o bin/$(PROJECT_NAME) $(LDFLAGS)
