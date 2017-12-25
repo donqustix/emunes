@@ -104,12 +104,12 @@ namespace
         int burst_phase = 0;
 
         const SDL sdl{SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER | SDL_INIT_AUDIO};
-        const SDLwindow window{"emunes", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 1366, 768};
+        const SDLwindow window{"emunes", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, ntsc_out_width, render_height};
         const SDLrenderer renderer{window.handle};
         const SDLtexture texture{renderer.handle, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, ntsc_out_width, 240};
 
         ::SDL_RenderSetLogicalSize(renderer.handle, ntsc_out_width, render_height);
-        ::SDL_SetWindowFullscreen(window.handle, SDL_WINDOW_FULLSCREEN);
+        //::SDL_SetWindowFullscreen(window.handle, SDL_WINDOW_FULLSCREEN);
 
         if (sound_queue.init(44100))
             throw std::runtime_error{"It's failed to initialize Sound_Queue"};
