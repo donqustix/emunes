@@ -77,7 +77,7 @@ void PPU::render_pixel() noexcept
             }
         }
     }
-    framebuffer[scanline * 256 + x] = memory_read(0x3F00 + pal);
+    pixel_output[scanline * 256 + x] = memory_read(0x3F00 + pal);
 }
 
 void PPU::sprite_operations() noexcept
@@ -210,10 +210,6 @@ void PPU::tick() noexcept
                 case 0: stat &= ~(MASK_STAT_SPRITE_OVERFLOW | MASK_STAT_SPRITE_ZERO_HIT); break;
                 case 1: stat &= ~ MASK_STAT_VBLANK; s0_next_scanline = false;             break;
             }
-        break;
-        case 240:
-            if (clks == 1)
-                for (int i = 0; i < 240 * 256; ++i) pixel_output[i] = framebuffer[i];
         break;
     }
     if (mask & MASK_MASK_RENDERING_ENABLED)

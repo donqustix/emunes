@@ -57,7 +57,7 @@ void CPU::wb(u16 address, u8 value) noexcept
     else if (address < 0x4020); // normally disabled
     else if (address < 0x6000); // cartridge space
     else if (address < 0x8000) mem_pointers.cartridge->write_ram(address - 0x6000, value);
-    else mem_pointers.cartridge->write_mapper(value);
+    else mem_pointers.cartridge->write_mapper(address, value);
 }
 
 u8 CPU::rb(u16 address) noexcept
@@ -89,7 +89,8 @@ u8 CPU::rb(u16 address) noexcept
         }
     }
     else if (address < 0x4020) return 0; // normally disabled
-    else if (address < 0x8000) return 0;
+    else if (address < 0x6000) return 0;
+    else if (address < 0x8000) return mem_pointers.cartridge->read_ram(address - 0x6000);
     else return mem_pointers.cartridge->read_rom(address - 0x8000);
 
     return 0;

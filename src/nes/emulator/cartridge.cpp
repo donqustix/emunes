@@ -27,8 +27,8 @@ Cartridge Cartridge::load(std::string_view filepath)
                  "mapper index:        \t" << (int) mapper_index << std::endl <<
                  "control byte:        \t" << (int) control_byte << std::endl;
     const bool mapper_supported = mapper_index == 0 || mapper_index == 2 ||
-                                  mapper_index == 3 || mapper_index == 7;
-    if (!mapper_supported) throw std::runtime_error{"the mapper is not supported yet; supported mappers: 0,2,3,7"};
+                                  mapper_index == 3 || mapper_index == 7 || mapper_index == 1;
+    if (!mapper_supported) throw std::runtime_error{"the mapper is not supported yet; supported mappers: 0,1,2,3,7"};
     for (int i = 0; i < 8; ++i) stream.get();
     const unsigned rom_size = 0x4000 * rom16_banks, vmem_size = 0x2000 * vrom8_banks;
     std::vector<unsigned char> rom, ram(8192), vmem;  rom.reserve( rom_size);
@@ -39,6 +39,6 @@ Cartridge Cartridge::load(std::string_view filepath)
              std::move( ram),
              std::move(vmem), rom16_banks,
                               vrom8_banks, mapper_index,
-             static_cast<Data::Mirror>(mapper_index == 7 ? Data::Mirror::SINGL : control_byte & 1)}};
+             static_cast<Data::Mirror>(mapper_index == 7 || mapper_index == 1 ? Data::Mirror::SINGL : control_byte & 1)}};
 }
 

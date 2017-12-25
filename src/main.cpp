@@ -100,16 +100,16 @@ namespace
 
         constexpr int ntsc_out_width = NES_NTSC_OUT_WIDTH(256), render_height = 240 * 2;
 
-        std::uint16_t pixel_output[ntsc_out_width * 240];
+        std::uint_least16_t pixel_output[ntsc_out_width * 240];
         int burst_phase = 0;
 
         const SDL sdl{SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER | SDL_INIT_AUDIO};
-        const SDLwindow window{"emunes", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 800, 600};
+        const SDLwindow window{"emunes", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 1366, 768};
         const SDLrenderer renderer{window.handle};
         const SDLtexture texture{renderer.handle, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, ntsc_out_width, 240};
 
         ::SDL_RenderSetLogicalSize(renderer.handle, ntsc_out_width, render_height);
-        //::SDL_SetWindowFullscreen(window.handle, SDL_WINDOW_FULLSCREEN);
+        ::SDL_SetWindowFullscreen(window.handle, SDL_WINDOW_FULLSCREEN);
 
         if (sound_queue.init(44100))
             throw std::runtime_error{"It's failed to initialize Sound_Queue"};
@@ -144,12 +144,12 @@ namespace
                                           key_states[SDL_SCANCODE_RIGHT  ] << 7;
             controller.set_port_keys<0>(control);
 
-            cpu.run_cpu(29781);
+            cpu.run_cpu(29780);
             apu.end_time_frame(cpu.get_cpu_time());
             cpu.reset_cpu_time();
 
             burst_phase ^= 1;
-            ::nes_ntsc_blit(&nes_ntsc, framebuffer, 256, burst_phase, 256, 240, pixel_output, ntsc_out_width * 2);
+            ::nes_ntsc_blit(&nes_ntsc, framebuffer, 256, burst_phase, 256, 240, pixel_output, ntsc_out_width * sizeof (std::uint_least16_t));
 
             Uint32* pixels;
             int pitch;
