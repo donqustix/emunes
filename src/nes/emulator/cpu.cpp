@@ -7,15 +7,14 @@
 
 using namespace nes::emulator;
 
-cpu_time_t CPU::earliest_irq_before(cpu_time_t end_time) noexcept
+void CPU::poll_int() noexcept
 {
-    if (!(P & MI))
+         if (nmi) {pending_interrupt = NMI; nmi = false;}
+    else if (!(P & MI))
     {
-        const cpu_time_t irq_time = mem_pointers.apu->earliest_irq();
-        if (irq_time < end_time)
-            end_time = irq_time;
+        if (cpu_time >= mem_pointers.apu->earliest_irq())
+            pending_interrupt = IRQ;
     }
-    return end_time;
 }
 
 void CPU::sync_hardware() noexcept
@@ -112,6 +111,7 @@ void CPU::instruction() noexcept
     {
         case RST: op = 0x100; break;
         case NMI: op = 0x101; break;
+        case IRQ: op = 0x102; break;
     }
 
     switch (op)
@@ -317,6 +317,7 @@ void CPU::instruction() noexcept
         case 0x000: INT<BRK>(); break;
         case 0x100: INT<RST>(); break;
         case 0x101: INT<NMI>(); break;
+        case 0x102: INT<IRQ>(); break;
     }
 }
 

@@ -144,7 +144,7 @@ namespace nes::emulator
             {
                  if (~ctrl   & stat & CTRL_MASK_GENERATE_NMI) set_cpu_nmi(1);
             }
-            tmp_vaddr = (tmp_vaddr & 0x73FF) | ((open_bus_data & 0x03) << 10);
+            tmp_vaddr = (tmp_vaddr & 0x73FF) | ((open_bus_data  &  3) << 10);
             ctrl = open_bus_data;
         }
 

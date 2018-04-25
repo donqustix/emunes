@@ -61,7 +61,6 @@ namespace
     Sound_Queue sound_queue;
 
     int dmc_read(void* user_data, cpu_addr_t address) noexcept {return static_cast<nes::emulator::CPU*>(user_data)->dmc_read(user_data, address);}
-    void irq_changed(void* user_data) noexcept {static_cast<nes::emulator::CPU*>(user_data)->irq_changed(user_data);}
     void output_samples(const blip_sample_t* samples, size_t count) noexcept {sound_queue.write(samples, count);}
 
     void run(const char* rom)
@@ -84,7 +83,6 @@ namespace
         mem_pointers_ppu.cpu            = &cpu;
         ppu.set_mem_pointers(mem_pointers_ppu);
 
-        apu.set_irq_changed(::irq_changed, &cpu);
         apu.set_dmc_reader(::dmc_read, &cpu);
         apu.set_output_samples(::output_samples);
 
@@ -104,7 +102,7 @@ namespace
         int burst_phase = 0;
 
         const SDL sdl{SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER | SDL_INIT_AUDIO};
-        const SDLwindow window{"emunes", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, ntsc_out_width, render_height};
+        const SDLwindow window{"emunes", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 640, 480};
         const SDLrenderer renderer{window.handle};
         const SDLtexture texture{renderer.handle, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, ntsc_out_width, 240};
 

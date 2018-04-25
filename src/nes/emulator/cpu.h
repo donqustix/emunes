@@ -43,12 +43,11 @@ namespace nes::emulator
         u8   A = 0,  X = 0, Y = 0, P = 0, S = 0;
         u16 PC = 0;
 
-        cpu_time_t cpu_end_time;
-        cpu_time_t cpu_time;
+        cpu_time_t cpu_time = 0;
 
         InterruptType pending_interrupt = RST;
 
-        bool nmi = false, stop = false;
+        bool nmi = false, irq = false;
 
         void sync_hardware() noexcept;
 
@@ -68,10 +67,7 @@ namespace nes::emulator
             P &= ~MC; P |=                  t   >> 8 & MC;
         }
 
-        void poll_int() noexcept
-        {
-            if (nmi) {pending_interrupt = NMI; nmi = false;}
-        }
+        void poll_int() noexcept;
 
         u16  zp() noexcept {const u16 a = rb(PC++);  PC &= 0xFFFF; return a;}
         u16 zpx() noexcept {const u16 a = zp(); rb(a); return (a + X) & 255;}
@@ -181,7 +177,7 @@ namespace nes::emulator
         void clc() noexcept {poll_int(); rb(PC); P &= ~MC;}
         void cld() noexcept {poll_int(); rb(PC); P &= ~MD;}
         void clv() noexcept {poll_int(); rb(PC); P &= ~MV;}
-        void cli() noexcept {poll_int(); rb(PC); if (P & MI) {P &= ~MI; stop = true;}}
+        void cli() noexcept {poll_int(); rb(PC); P &= ~MI;}
 
         void sei() noexcept {poll_int(); rb(PC); P |= MI;}
         void sec() noexcept {poll_int(); rb(PC); P |= MC;}
@@ -206,7 +202,7 @@ namespace nes::emulator
         void pla() noexcept {rb(PC); sync_hardware(); poll_int(); up_flag_nz(A = pop());}
         void plp() noexcept {rb(PC); sync_hardware(); poll_int(); P = pop() & 0xEF;}
 
-        void rti() noexcept {rb(PC); sync_hardware();  P = pop() & 0xEF;       PC = pop(); poll_int();    PC |= pop() << 8;}
+        void rti() noexcept {rb(PC); sync_hardware();  P = pop() & 0xEF; PC = pop(); poll_int(); PC |= pop() << 8;}
         void rts() noexcept {rb(PC); sync_hardware(); PC = pop() | pop() << 8; poll_int(); sync_hardware(); ++PC &= 0xFFFF;}
 
         void rel(bool cond) noexcept
@@ -271,8 +267,8 @@ namespace nes::emulator
                 else      address = vectors[type];
             }
 
-                 if constexpr (type == BRK               ) push(P | 0x30);
-            else if constexpr (type == IRQ || type == NMI) push(P | 0x20);
+                 if constexpr (type == BRK) push(P | 0x30);
+            else if constexpr (type != RST) push(P | 0x20);
 
             PC  = rb(address    )     ;
             PC |= rb(address + 1) << 8;
@@ -281,40 +277,15 @@ namespace nes::emulator
             pending_interrupt = NuLL;
         }
 
-        cpu_time_t earliest_irq_before(cpu_time_t end_time) noexcept;
-
         void run_cpu_until(cpu_time_t end_time) noexcept
         {
-            while (cpu_time < end_time)
-            {
-                cpu_end_time = earliest_irq_before(end_time);
-                if (cpu_end_time <= cpu_time)
-                {
-                    INT<IRQ>();
-                    cpu_end_time = end_time;
-                }
-                emulate_cpu();
-            }
-        }
-
-        void emulate_cpu() noexcept
-        {
-            while (cpu_time < cpu_end_time)
-            {
-                instruction();
-                if (stop) {stop = false; break;}
-            }
+            while (cpu_time < end_time) instruction();
         }
 
         void oam_dma(u8 value) noexcept;
 
     public:
         CPU() noexcept {for (int i = 0; i < 0x800; ++i) internal_ram[i] = (i & 4) ? 255 : 0;}
-
-        void irq_changed(void*) noexcept
-        {
-            cpu_end_time = earliest_irq_before(cpu_end_time);
-        }
 
         int dmc_read(void*, cpu_addr_t address) noexcept {return rb(address);}
 

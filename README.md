@@ -1,5 +1,5 @@
 # emunes
-Noexcept quality NES emulator written in C++17.\*
+A *noexcept-quality*\* NES emulator written in C++17.
 
 Passes almost all Blargg's tests: vbl/nmi & instruction timing; dummy reads; sprite behaviour.
 
@@ -19,9 +19,9 @@ make
 
 Now, you are ready to use the emulator.
 
-Use 'emunes filepath' to load a game.
+Type 'emunes filepath' to load a ROM.
 
-\*Source code contains **noexcept** keyword.
+\*The source code contains **noexcept** keyword everywhere.
 
 ## Screenshots
 ![alt tag](/res/images/1.png)
