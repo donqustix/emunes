@@ -97,10 +97,11 @@ u8 CPU::rb(u16 address) noexcept
 
 void CPU::oam_dma(u8 value) noexcept
 {
-    rb(value << 8);
-    if (mem_pointers.ppu->odd_frame()) sync_hardware();
+    const u16 dummy_value = value << 8;
+                           rb(dummy_value);
+    if (cpu_time % 2 == 0) rb(dummy_value);
     for (u16 i = 0; i < 256; ++i)
-        wb(0x2004, rb((value << 8) | i));
+        wb(0x2004, rb(dummy_value | i));
 }
 
 void CPU::instruction() noexcept

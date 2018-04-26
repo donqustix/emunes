@@ -1,8 +1,6 @@
 #ifndef CONTROLLER_H
 #define CONTROLLER_H
 
-#include "int_alias.h"
-
 namespace nes::emulator
 {
     class Controller final
@@ -33,12 +31,12 @@ namespace nes::emulator
         template<bool port>
         u8 read() noexcept
         {
-            u8* port_i;
+            unsigned char* port_i;
             if constexpr (port) port_i = &port_2;
             else                port_i = &port_1;
             if (strobe) return *port_i & 1;
-            const u8 temp    = *port_i & 1; *port_i >>= 1;
-            return   temp;
+            const auto temp  = *port_i & 1; *port_i >>= 1;
+            return     temp;
         }
 
         template<bool port>
