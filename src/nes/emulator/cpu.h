@@ -9,7 +9,6 @@ namespace nes::emulator
 {
     class Cartridge;
     class PPU;
-    class CPU;
     class APU;
     class Controller;
 
@@ -199,11 +198,11 @@ namespace nes::emulator
         void pha() noexcept {rb(PC); poll_int(); push(A);}
         void php() noexcept {rb(PC); poll_int(); push(P | 0x30);}
 
-        void pla() noexcept {rb(PC); sync_hardware(); poll_int(); up_flag_nz(A = pop());}
-        void plp() noexcept {rb(PC); sync_hardware(); poll_int(); P = pop() & 0xEF;}
+        void pla() noexcept {rb(PC); sync_hardware(); poll_int(); up_flag_nz(A = pop());      }
+        void plp() noexcept {rb(PC); sync_hardware(); poll_int();            P = pop() & 0xEF;}
 
-        void rti() noexcept {rb(PC); sync_hardware();  P = pop() & 0xEF; PC = pop(); poll_int(); PC |= pop() << 8;}
-        void rts() noexcept {rb(PC); sync_hardware(); PC = pop() | pop() << 8; poll_int(); sync_hardware(); ++PC &= 0xFFFF;}
+        void rti() noexcept {rb(PC); sync_hardware();  P = pop() & 0xEF;       PC = pop();      poll_int();   PC |= pop() << 8;}
+        void rts() noexcept {rb(PC); sync_hardware(); PC = pop() | pop() << 8; poll_int(); sync_hardware(); ++PC &=     0xFFFF;}
 
         void rel(bool cond) noexcept
         {
@@ -267,8 +266,8 @@ namespace nes::emulator
                 else      address = vectors[type];
             }
 
-                 if constexpr (type == BRK) push(P | 0x30);
-            else if constexpr (type != RST) push(P | 0x20);
+                 if constexpr (type == BRK)                push(P | 0x30);
+            else if constexpr (type == IRQ || type == NMI) push(P | 0x20);
 
             PC  = rb(address    )     ;
             PC |= rb(address + 1) << 8;

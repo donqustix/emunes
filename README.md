@@ -3,25 +3,39 @@ A *noexcept-quality*\* NES emulator written in C++17.
 
 Passes almost all Blargg's tests: vbl/nmi & instruction timing; dummy reads; sprite behaviour.
 
-Runs a large amount of games with mappers: 0, 1, 2, 3, 7.
+Runs a large amount of NTSC-compatible games with mappers: 0, 1, 2, 3, 7.
+
+## List of passed tests
+
+- [x] branch\_timing\_tests
+- [x] cpu\_dummy\_reads
+- [ ] cpu\_interrupts\_v2
+      - [x] cli_latency
+      - [x] nmi_and_brk
+      - [ ] nmi_and_irq
+- [x] \(official only) cpu\_timing\_test6
+- [x] instr\_misc
+- [x] \(offical only) instr\_test\_v5
+- [x] \(offical only) instr\_timing
+- [x] oam\_read
+- [x] ppu\_open\_bus
+- [x] ppu\_sprite\_hit
+- [x] ppu\_sprite\_overflow
+- [x] ppu\_vbl\_nmi
 
 ## Building
-You need a compiler that supports C++17.  
-You need an SDL2 library to be installed in your system.
 
-**Enter the following commands to build for Linux**
+**Enter the following commands to build under Linux**
 ```
-apt install libsdl2-dev
+apt install libsdl2-dev g++
 cd project_root_directory
 mkdir bin
 make
 ```
 
-Now, you are ready to use the emulator.
-
 Type 'emunes filepath' to load a ROM.
 
-\*The source code contains **noexcept** keyword everywhere.
+\*The source code contains a **noexcept** keyword everywhere.
 
 ## Screenshots
 ![alt tag](/res/images/1.png)
