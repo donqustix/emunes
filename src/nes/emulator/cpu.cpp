@@ -12,7 +12,7 @@ void CPU::poll_int() noexcept
          if (nmi) {pending_interrupt = NMI; nmi = false;}
     else if (!(P & MI))
     {
-        if (cpu_time >= mem_pointers.apu->earliest_irq())
+        if (cpu_time >= mem_pointers.apu->earliest_irq() - 1)
             pending_interrupt = IRQ;
     }
 }

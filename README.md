@@ -12,7 +12,9 @@ Runs a large amount of NTSC-compatible games with mappers: 0, 1, 2, 3, 7.
 - [ ] cpu\_interrupts\_v2
     - [x] cli\_latency
     - [x] nmi\_and\_brk
-    - [ ] nmi\_and\_irq
+    - [x] nmi\_and\_irq
+    - [ ] irq\_and\_dma
+    - [ ] branch\_delays\_irq
 - [x] \(official only) cpu\_timing\_test6
 - [x] instr\_misc
 - [x] \(offical only) instr\_test\_v5
