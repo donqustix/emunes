@@ -1,6 +1,8 @@
 #ifndef CONTROLLER_H
 #define CONTROLLER_H
 
+#include "int_alias.h"
+
 namespace nes::emulator
 {
     class Controller final
