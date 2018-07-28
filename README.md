@@ -37,7 +37,7 @@ make
 
 Type 'emunes filepath' to load a ROM.
 
-\*The source code contains a **noexcept** keyword everywhere.
+\*The source code contains the **noexcept** keyword everywhere.
 
 ## Screenshots
 ![alt tag](/res/images/1.png)
